@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Link2, Store, Tags, Calculator, Info, BadgeCheck, HelpCircle } from "lucide-react";
+import { Link2, Store, Tags, Calculator, Info, BadgeCheck, HelpCircle, Frown, Smile } from "lucide-react";
 import { Combobox } from "@/components/Combobox";
 import {
   Tooltip, TooltipContent, TooltipProvider, TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { api } from "@/lib/api";
+import { money } from "@/lib/format";
 import { toast } from "sonner";
 
 export function SavingsEngine({ onResult, initial }) {
@@ -20,6 +21,7 @@ export function SavingsEngine({ onResult, initial }) {
   const [amazonFlipkart, setAmazonFlipkart] = useState(false);
   const [detectedCategory, setDetectedCategory] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [lastResult, setLastResult] = useState(null);
 
   useEffect(() => {
     (async () => {
@@ -79,6 +81,7 @@ export function SavingsEngine({ onResult, initial }) {
         store_id: storeId, store_name: selectedStore?.name, category,
         customer_type: customerType, mrp: Number(mrp), price: Number(price),
       });
+      setLastResult(data);
       onResult(data);
       setTimeout(() => document.getElementById("results-anchor")?.scrollIntoView({ behavior: "smooth", block: "start" }), 60);
     } catch { toast.error("Calculation failed"); }
@@ -201,13 +204,62 @@ export function SavingsEngine({ onResult, initial }) {
           </div>
         </div>
 
+        <MoneyMeter mrp={mrp} price={price} store={selectedStore?.name} category={category}
+          customerType={customerType} lastResult={lastResult} />
+
         <button
           onClick={calculate} disabled={loading} data-testid="btn-calculate"
-          className="btn-gold focus-ring mt-6 flex w-full items-center justify-center gap-2 rounded-full py-3.5 text-base font-700 transition-transform active:scale-[0.99] disabled:opacity-60"
+          className="btn-gold focus-ring mt-4 flex w-full items-center justify-center gap-2 rounded-full py-3.5 text-base font-700 transition-transform active:scale-[0.99] disabled:opacity-60"
         >
           <Calculator className="h-5 w-5" /> {loading ? "Calculating…" : "Calculate My Stack"}
         </button>
       </div>
     </TooltipProvider>
+  );
+}
+
+function MoneyMeter({ mrp, price, store, category, customerType, lastResult }) {
+  const hasInputs = mrp && price && Number(mrp) > 0 && Number(price) > 0 && Number(price) <= Number(mrp);
+  const matches = lastResult &&
+    lastResult.inputs.store === store &&
+    lastResult.inputs.category === category &&
+    lastResult.inputs.customer_type === customerType &&
+    Number(lastResult.inputs.price.exact) === Number(price) &&
+    Number(lastResult.inputs.mrp.exact) === Number(mrp);
+  const happy = matches && lastResult.summary.extra_saved.rupees > 0;
+
+  let state = "idle";
+  if (happy) state = "happy";
+  else if (hasInputs) state = "worried";
+
+  const cfg = {
+    idle: { border: "border-border", bg: "", face: null, title: "Enter MRP & price to reveal your optimized savings.", sub: "" },
+    worried: {
+      border: "border-destructive/40", bg: "bg-destructive/5", face: "sad",
+      title: "STOP! You might be leaving money on the table.",
+      sub: "Calculate your stack to route the lowest possible bill.",
+    },
+    happy: {
+      border: "border-savings/50", bg: "bg-savings/5", face: "happy",
+      title: happy ? `You saved ${money(lastResult.summary.extra_saved)} extra with YuktiCart!` : "",
+      sub: "Smart stack — follow the checkout sequence below.",
+    },
+  }[state];
+
+  return (
+    <div data-testid="money-meter" data-state={state}
+      className={`mt-5 flex items-center gap-3 rounded-xl border p-3.5 transition-colors ${cfg.border} ${cfg.bg}`}>
+      <div className="relative h-9 w-9 shrink-0">
+        <Frown className={`absolute inset-0 h-9 w-9 text-destructive transition-all duration-500 ${cfg.face === "sad" ? "opacity-100 scale-100" : "opacity-0 scale-75"}`} />
+        <Smile className={`absolute inset-0 h-9 w-9 text-savings transition-all duration-500 ${cfg.face === "happy" ? "opacity-100 scale-100" : "opacity-0 scale-75"}`} />
+        {!cfg.face && <span className="absolute inset-0 grid place-items-center text-ink-muted">₹</span>}
+      </div>
+      <div className="min-w-0">
+        <p className={`text-sm font-600 ${state === "worried" ? "text-destructive" : state === "happy" ? "text-savings" : "text-ink-muted"}`}>
+          {cfg.title}
+        </p>
+        {cfg.sub && <p className="text-xs text-ink-muted">{cfg.sub}</p>}
+      </div>
+    </div>
   );
 }

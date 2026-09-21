@@ -171,6 +171,30 @@
 .intro-timer { animation: intro-hold 1.9s linear forwards; }
 .intro-step { opacity: .3; animation: intro-step .35s ease forwards; }
 
+@keyframes stamp-drop {
+  0% { transform: translate(-50%,-50%) scale(2.4) rotate(-18deg); opacity: 0; }
+  55% { transform: translate(-50%,-50%) scale(.92) rotate(-11deg); opacity: 1; }
+  70% { transform: translate(-50%,-50%) scale(1.04) rotate(-13deg); }
+  100% { transform: translate(-50%,-50%) scale(1) rotate(-12deg); opacity: 1; }
+}
+@keyframes ink-splat { 0% { transform: scale(0); opacity: .5; } 100% { transform: scale(1.6); opacity: 0; } }
+@keyframes seal-press {
+  0% { transform: translate(-50%,-50%) scale(2.6); opacity: 0; }
+  60% { transform: translate(-50%,-50%) scale(.9); opacity: 1; }
+  100% { transform: translate(-50%,-50%) scale(1); opacity: 1; }
+}
+@keyframes shine-sweep { 0% { left: -60%; } 100% { left: 130%; } }
+@keyframes scan-line { 0% { top: 0; opacity: 0; } 10% { opacity: 1; } 90% { opacity: 1; } 100% { top: 100%; opacity: 0; } }
+@keyframes check-pop { 0% { transform: scale(0) rotate(-20deg); opacity: 0; } 70% { transform: scale(1.15); opacity: 1; } 100% { transform: scale(1) rotate(0); opacity: 1; } }
+@keyframes receipt-rise { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: translateY(0); } }
+.stamp-drop { animation: stamp-drop .7s cubic-bezier(.2,.8,.2,1) both; }
+.ink-splat { animation: ink-splat .7s ease-out both; }
+.seal-press { animation: seal-press .6s cubic-bezier(.2,.8,.2,1) both; }
+.shine-sweep::after { content:""; position:absolute; top:0; bottom:0; width:40%; background:linear-gradient(100deg,transparent,rgba(255,255,255,.35),transparent); animation: shine-sweep 1.1s ease .3s both; }
+.scan-line { animation: scan-line 1.1s ease both; }
+.check-pop { animation: check-pop .6s cubic-bezier(.2,.8,.2,1) .5s both; }
+.receipt-rise { animation: receipt-rise .5s ease both; }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: .001ms !important;

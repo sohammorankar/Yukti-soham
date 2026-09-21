@@ -1,7 +1,8 @@
 import React, { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { Menu, X, Lock, Sparkles, Palette, Flame } from "lucide-react";
+import { Menu, X, Lock, Palette, Flame } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
+import { Logo } from "@/components/site/Logo";
 
 const LINKS = [
   { to: "/deals", label: "Deals" },
@@ -20,14 +21,7 @@ export function Nav({ onOpenMandir }) {
   return (
     <header className="sticky top-0 z-40 glass" data-testid="site-nav">
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6">
-        <Link to="/" className="flex items-center gap-2 focus-ring rounded-md" data-testid="nav-logo">
-          <span className="grid h-9 w-9 place-items-center rounded-lg btn-gold">
-            <Sparkles className="h-5 w-5" />
-          </span>
-          <span className="font-display text-xl font-600 tracking-tight text-ink">
-            Yukti<span className="gold-text">Cart</span>
-          </span>
-        </Link>
+        <Logo />
 
         <nav className="hidden items-center gap-1 lg:flex" aria-label="Primary">
           {LINKS.map((l) => (

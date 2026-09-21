@@ -44,6 +44,22 @@ STORES = [
     ("Lifelong", "allowed", None, "yes"),
 ]
 
+STORE_URLS = {
+    "Amazon": "https://www.amazon.in",
+    "Flipkart": "https://www.flipkart.com",
+    "Myntra": "https://www.myntra.com",
+    "Ajio": "https://www.ajio.com",
+    "Nykaa": "https://www.nykaa.com",
+    "Firstcry": "https://www.firstcry.com",
+    "Tata Cliq": "https://www.tatacliq.com",
+    "Shopsy": "https://www.shopsy.in",
+    "Ghar Soap": "https://www.gharsoap.com",
+    "Ghoor": "https://www.ghoor.com",
+    "Dot & Key": "https://www.dotandkey.com",
+    "Foxtale": "https://foxtale.in",
+    "Lifelong": "https://www.lifelongindiaonline.com",
+}
+
 DOMAINS = {
     "Amazon": ["amazon.in", "amazon.com", "amzn.to"],
     "Flipkart": ["flipkart.com", "fkrt.it", "dl.flipkart.com"],
@@ -197,6 +213,7 @@ async def seed_all(db):
             sdocs.append({
                 "id": store_id, "name": name, "active": True, "stacking": stacking,
                 "stacking_note": note, "split_payment_supported": split,
+                "store_url": STORE_URLS.get(name),
                 "archived_at": None, "created_at": now_iso(), "updated_at": now_iso(),
             })
             for i, dom in enumerate(DOMAINS.get(name, [])):

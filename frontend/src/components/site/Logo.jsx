@@ -1,0 +1,31 @@
+import React from "react";
+import { Link } from "react-router-dom";
+import { ShoppingCart, Sparkles } from "lucide-react";
+
+// Wordmark styled after the provided brand: orange cart badge + "Yukti"+"Cart"+".com"
+export function Logo({ to = "/", showTagline = true, size = "md" }) {
+  const badge = size === "sm" ? "h-8 w-8" : "h-9 w-9";
+  const text = size === "sm" ? "text-lg" : "text-xl";
+  const inner = (
+    <div className="flex items-center gap-2">
+      <span className={`relative grid ${badge} place-items-center rounded-xl`}
+        style={{ background: "linear-gradient(150deg,#1c1c20,#0a0a0b)", border: "1px solid var(--hairline)" }}>
+        <ShoppingCart className="h-4 w-4" style={{ color: "#f59e0b" }} />
+        <Sparkles className="absolute -right-1 -top-1 h-3 w-3" style={{ color: "#fbbf24" }} />
+      </span>
+      <div className="leading-none">
+        <span className={`font-display ${text} font-600 tracking-tight`}>
+          <span className="text-ink">Yukti</span>
+          <span style={{ color: "#f59e0b" }}>Cart</span>
+          <span className="text-ink-muted">.com</span>
+        </span>
+        {showTagline && (
+          <div className="mt-0.5 text-[9px] font-600 uppercase tracking-[0.18em] text-ink-muted">
+            Tactical Savings Engine
+          </div>
+        )}
+      </div>
+    </div>
+  );
+  return to ? <Link to={to} className="focus-ring rounded-md">{inner}</Link> : inner;
+}

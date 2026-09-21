@@ -1,6 +1,7 @@
 import React from "react";
 import { Link } from "react-router-dom";
-import { Sparkles, Mail } from "lucide-react";
+import { Mail } from "lucide-react";
+import { Logo } from "@/components/site/Logo";
 
 const COLS = [
   {
@@ -47,14 +48,7 @@ export function Footer() {
     <footer className="mt-24 border-t border-border" data-testid="site-footer">
       <div className="mx-auto grid max-w-7xl gap-10 px-4 py-14 sm:px-6 lg:grid-cols-[1.4fr_repeat(4,1fr)]">
         <div className="max-w-xs">
-          <Link to="/" className="flex items-center gap-2">
-            <span className="grid h-9 w-9 place-items-center rounded-lg btn-gold">
-              <Sparkles className="h-5 w-5" />
-            </span>
-            <span className="font-display text-xl font-600 text-ink">
-              Yukti<span className="gold-text">Cart</span>
-            </span>
-          </Link>
+          <Logo showTagline={false} />
           <p className="mt-4 text-sm leading-relaxed text-ink-muted">
             A tactical savings and checkout-stack engine for Indian shoppers. We find the
             mathematically best payment route across affiliate cashback and discounted gift cards.

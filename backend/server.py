@@ -24,7 +24,7 @@ from typing import List, Optional, Literal
 from money import D, q, round_rupee, money_out
 from engine import (calculate_stack, detect_store, detect_category,
                     rate_is_eligible, category_matches)
-from seed import seed_all, sid, now_iso
+from seed import seed_all, sid, now_iso, STORE_URLS
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("yukticart")
@@ -205,6 +205,12 @@ async def startup():
     if created:
         logger.info(f"Seeded: {created}")
 
+    # Backfill store_url for stores created before this field existed
+    for name, url in STORE_URLS.items():
+        await db.stores.update_one(
+            {"name": name, "store_url": {"$in": [None, ""]}},
+            {"$set": {"store_url": url}})
+
     # Owner bootstrap via allowlist (open admin registration disabled)
     allowlist = [e.strip().lower() for e in os.environ.get("ADMIN_ALLOWLIST", "").split(",") if e.strip()]
     admin_email = os.environ.get("ADMIN_EMAIL", "owner@yukticart.com").lower()
@@ -361,6 +367,23 @@ async def calculate(body: CalcBody):
     result = calculate_stack(store, body.category, body.customer_type, body.mrp,
                              body.price, aff, gc, rate_version=RATE_VERSION)
     result["fallback"] = fallback
+
+    # Enrich routes with the partner's website (editable in the console) so the UI
+    # can offer a direct "Continue via <partner>" link. CTA points to the affiliate partner.
+    plats = await db.platforms.find({}, {"_id": 0, "name": 1, "website_url": 1}).to_list(500)
+    plat_url = {p["name"]: p.get("website_url") for p in plats}
+    for side in (result.get("affiliate"), result.get("gift_card")):
+        if not side:
+            continue
+        for opt in side.get("options", []):
+            opt["platform_url"] = plat_url.get(opt.get("platform_name"))
+        if side.get("best"):
+            side["best"]["platform_url"] = plat_url.get(side["best"].get("platform_name"))
+    result["store_url"] = store.get("store_url")
+    result["preferred_affiliate_url"] = (
+        result["affiliate"]["best"].get("platform_url")
+        if result.get("affiliate") and result["affiliate"].get("best") else None
+    )
     return result
 
 
@@ -557,6 +580,7 @@ async def create_store(body: dict, request: Request, user=Depends(require_write)
     doc = {"id": str(uuid.uuid4()), "name": name, "active": True,
            "stacking": body.get("stacking", "unsure"),
            "stacking_note": body.get("stacking_note"),
+           "store_url": body.get("store_url"),
            "split_payment_supported": body.get("split_payment_supported", "unsure"),
            "archived_at": None, "created_at": now_iso(), "updated_at": now_iso()}
     await db.stores.insert_one(dict(doc))
@@ -570,7 +594,7 @@ async def update_store(sid_: str, body: dict, request: Request, user=Depends(req
     if not before:
         raise HTTPException(404, "Not found")
     upd = {k: body[k] for k in ("name", "active", "stacking", "stacking_note",
-                                "split_payment_supported") if k in body}
+                                "store_url", "split_payment_supported") if k in body}
     upd["updated_at"] = now_iso()
     await db.stores.update_one({"id": sid_}, {"$set": upd})
     after = await db.stores.find_one({"id": sid_}, {"_id": 0})
