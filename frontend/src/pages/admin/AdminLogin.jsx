@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import { useMeta } from "@/lib/useMeta";
@@ -14,7 +14,9 @@ export default function AdminLogin() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
-  if (user && user.roles?.length) navigate("/admin");
+  useEffect(() => {
+    if (user && user.roles?.length) navigate("/admin");
+  }, [user, navigate]);
 
   const submit = async (e) => {
     e.preventDefault();

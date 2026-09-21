@@ -1,0 +1,6 @@
+Category	New Rate	Existing Rate	Type	MOV	Cap	Valid From	Valid Until	Notes
+Electronics	4%	3.5%	percent	500		2026-06-01	2026-06-30	Daily Amazon rate
+Furniture/Home	6%	5%	percent				2026-06-01		
+Books	₹50	₹40	flat_amount	300			2026-06-30	Flat cashback
+Beauty	7%	6%	percent	999			
+Apparel	5.5%	4.5%	percent				Verify category before purchase
