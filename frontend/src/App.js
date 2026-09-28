@@ -10,6 +10,7 @@ import Home from "@/pages/Home";
 import { About, Mission, HowItWorks, Privacy, Terms, AffiliateDisclosure, CashbackDisclaimer, CookiePolicy, FAQ } from "@/pages/content";
 import { FeedbackPage } from "@/pages/FeedbackPage";
 import { Brands, Categories, Deals } from "@/pages/discovery";
+import Bridge from "@/pages/Bridge";
 
 import AdminLogin from "@/pages/admin/AdminLogin";
 import AdminLayout from "@/pages/admin/AdminLayout";
@@ -45,6 +46,8 @@ export default function App() {
               <Route path="/report-rate" element={<FeedbackPage kind="report_rate" />} />
               <Route path="/suggest" element={<FeedbackPage kind="suggest_store" />} />
             </Route>
+
+            <Route path="/go/:partner" element={<Bridge />} />
 
             <Route path="/admin/login" element={<AdminLogin />} />
             <Route path="/admin" element={<AdminLayout />}>

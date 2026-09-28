@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
   CheckCircle2, XCircle, AlertTriangle, TrendingUp, Receipt, Layers, Info,
@@ -104,6 +105,12 @@ export function ResultsView({ result }) {
             <Stat icon={TrendingUp} label="Total saved vs MRP" value={money(s.total_saving)} testid="result-total-saving" exact={moneyExact(s.total_saving)} />
             <Stat icon={Layers} label="Savings boost" value={`${s.total_saving_percent}%`} testid="result-boost" />
           </div>
+
+          {savingsConclusion(result) && (
+            <p className="mt-5 rounded-lg border border-savings/30 bg-savings/5 p-3 text-sm text-ink" data-testid="savings-conclusion">
+              {savingsConclusion(result)}
+            </p>
+          )}
         </div>
 
         {/* Route comparison */}
@@ -185,13 +192,20 @@ function PartnerSection({ result, side }) {
 
   const label = isAff ? "Affiliate partners" : "Gift card partners";
   const SectionIcon = isAff ? Percent : Gift;
-  const verb = isAff ? "Continue via" : "Buy gift card via";
+  const verb = isAff ? "Continue with" : "Buy gift card via";
   const sectionTestId = isAff ? "affiliate-partners" : "giftcard-partners";
   const ctaTestId = isAff ? "cta-continue-affiliate" : "cta-continue-giftcard";
   const toggleTestId = isAff ? "toggle-partners" : "toggle-giftcard-partners";
   const listTestId = isAff ? "partners-list" : "giftcard-partners-list";
   const rowPrefix = isAff ? "partner" : "giftcard-partner";
   const fmtRate = (o) => (o.value_type === "percent" ? `${o.value}%` : `₹${o.value}`);
+
+  // Route the CTA through YuktiCart's own bridge (/go/:partner). The bridge asks
+  // the backend for the trusted destination — the client never holds/builds the
+  // external URL. We only pass the partner slug + non-sensitive context.
+  const slug = (preferred.platform_name || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  const storeName = result.inputs?.store;
+  const bridgeTo = `/go/${slug}?kind=${side}${storeName ? `&store=${encodeURIComponent(storeName)}` : ""}`;
 
   return (
     <div className="surface rounded-xl p-5" data-testid={sectionTestId}>
@@ -212,10 +226,10 @@ function PartnerSection({ result, side }) {
           </p>
         </div>
         {preferredUrl ? (
-          <a href={preferredUrl} target="_blank" rel="noopener noreferrer" data-testid={ctaTestId}
+          <Link to={bridgeTo} data-testid={ctaTestId}
             className="btn-gold focus-ring inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-sm font-700">
             {verb} {preferred.platform_name} <ArrowUpRight className="h-4 w-4" />
-          </a>
+          </Link>
         ) : (
           <span data-testid={`${ctaTestId}-unavailable`}
             className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-2 text-xs text-ink-muted">
@@ -274,6 +288,20 @@ function PartnerSection({ result, side }) {
       )}
     </div>
   );
+}
+
+function savingsConclusion(result) {
+  const s = result.summary;
+  if (!(s.extra_saved?.rupees > 0)) return null;
+  const aff = result.affiliate?.best?.platform_name;
+  const gc = result.gift_card?.best?.platform_name;
+  const stk = result.stacking || {};
+  let route;
+  if (stk.double_stack && aff && gc) route = `by stacking ${aff} cashback with a ${gc} gift card`;
+  else if (stk.applied_route === "affiliate" && aff) route = `via ${aff} cashback`;
+  else if (stk.applied_route === "gift_card" && gc) route = `via a ${gc} discounted gift card`;
+  else route = "with this route";
+  return `You can save ${money(s.extra_saved)} extra with this Yukti-approved stack ${route}, bringing your effective bill to ${money(s.final_bill)}.`;
 }
 
 function Stat({ icon: Icon, label, value, exact, testid }) {

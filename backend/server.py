@@ -420,6 +420,32 @@ async def trending():
     return deals
 
 
+@api.get("/redirect/{slug}")
+async def partner_redirect(slug: str):
+    """Resolve a trusted external destination for a KNOWN partner (no open redirect).
+
+    The frontend never supplies the external URL — it only passes a partner slug
+    (normalized platform name). Only partners that exist in the platforms collection
+    with a valid http(s) website_url can be resolved. The destination is fully
+    backend-controlled and editable via the existing Admin → Platforms UI.
+    """
+    def _norm(v):
+        return re.sub(r"[^a-z0-9]", "", (v or "").lower())
+
+    target = _norm(slug)
+    if not target:
+        raise HTTPException(status_code=404, detail="Unknown partner")
+    plats = await db.platforms.find(
+        {"archived_at": None}, {"_id": 0, "name": 1, "website_url": 1, "kind": 1}).to_list(500)
+    match = next((p for p in plats if _norm(p.get("name")) == target), None)
+    if not match:
+        raise HTTPException(status_code=404, detail="Unknown partner")
+    url = (match.get("website_url") or "").strip()
+    if not url or not re.match(r"^https?://", url, re.I):
+        raise HTTPException(status_code=404, detail="No trusted destination configured for this partner")
+    return {"partner": match["name"], "kind": match.get("kind"), "url": url}
+
+
 @api.post("/detect")
 async def detect(body: DetectBody):
     domains = await db.store_domains.find({"active": True}, {"_id": 0}).to_list(2000)
