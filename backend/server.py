@@ -119,6 +119,14 @@ require_write = require_role(WRITE_ROLES)
 require_owner = require_role({"owner"})
 
 
+async def require_any_role(user: dict = Depends(get_current_user)) -> dict:
+    """Admin reads require a non-empty role set (per the documented security model).
+    Blocks roleless shopper accounts from reading admin reference lists."""
+    if not user.get("roles"):
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    return user
+
+
 async def audit(user: dict, action: str, entity_type: str, entity_id: str,
                 before=None, after=None, request: Request = None):
     await db.audit_log.insert_one({
@@ -146,6 +154,42 @@ def clean(doc: dict) -> dict:
 class LoginBody(BaseModel):
     email: EmailStr
     password: str
+
+
+class RegisterBody(BaseModel):
+    email: EmailStr
+    password: str
+    mobile: str
+    full_name: Optional[str] = None
+    gender: Optional[str] = None
+
+    @field_validator("password")
+    @classmethod
+    def strong_password(cls, v):
+        if len(v or "") < 8:
+            raise ValueError("Password must be at least 8 characters")
+        if not re.search(r"[A-Za-z]", v) or not re.search(r"\d", v):
+            raise ValueError("Password must include at least one letter and one number")
+        return v
+
+    @field_validator("mobile")
+    @classmethod
+    def indian_mobile(cls, v):
+        digits = re.sub(r"\D", "", v or "")
+        if len(digits) == 12 and digits.startswith("91"):
+            digits = digits[2:]
+        if not re.fullmatch(r"[6-9]\d{9}", digits):
+            raise ValueError("Enter a valid 10-digit Indian mobile number")
+        return digits
+
+    @field_validator("gender")
+    @classmethod
+    def valid_gender(cls, v):
+        if v in (None, ""):
+            return None
+        if v not in ("male", "female", "other", "prefer_not"):
+            raise ValueError("Invalid gender selection")
+        return v
 
 
 class CalcBody(BaseModel):
@@ -269,6 +313,33 @@ async def login(body: LoginBody, request: Request, response: Response):
     set_auth_cookies(response, access, refresh)
     return {"id": user["id"], "email": email, "name": user.get("name"), "roles": roles,
             "access_token": access}
+
+
+@api.post("/auth/register")
+async def register(body: RegisterBody, request: Request, response: Response):
+    """Shopper self-registration. Creates a ROLELESS user (no admin access) and
+    logs them in. Admin accounts are never created here — they come only from the
+    ADMIN_ALLOWLIST bootstrap, so this endpoint cannot escalate to admin."""
+    email = body.email.lower()
+    if await db.users.find_one({"email": email}):
+        raise HTTPException(status_code=409, detail="An account with this email already exists")
+    uid = str(uuid.uuid4())
+    doc = {
+        "id": uid, "email": email, "password_hash": hash_password(body.password),
+        "full_name": body.full_name, "name": body.full_name,
+        "gender": body.gender, "mobile": body.mobile,
+        "email_verified": False, "created_at": now_iso(),
+    }
+    try:
+        await db.users.insert_one(doc)
+    except Exception:
+        # unique email index guards against a race between the check and insert
+        raise HTTPException(status_code=409, detail="An account with this email already exists")
+    access = create_access_token(uid, email)
+    refresh = create_refresh_token(uid)
+    set_auth_cookies(response, access, refresh)
+    return {"id": uid, "email": email, "name": body.full_name, "full_name": body.full_name,
+            "gender": body.gender, "mobile": body.mobile, "roles": [], "access_token": access}
 
 
 @api.post("/auth/logout")
@@ -537,7 +608,7 @@ async def _is_referenced(entity_type, entity_id):
 
 # ---- Platforms ----
 @api.get("/admin/platforms")
-async def admin_platforms(user=Depends(get_current_user)):
+async def admin_platforms(user=Depends(require_any_role)):
     return await db.platforms.find({}, {"_id": 0}).sort("name", 1).to_list(500)
 
 
@@ -592,7 +663,7 @@ async def restore_platform(pid: str, request: Request, user=Depends(require_writ
 
 # ---- Stores + settings ----
 @api.get("/admin/stores")
-async def admin_stores(user=Depends(get_current_user)):
+async def admin_stores(user=Depends(require_any_role)):
     return await db.stores.find({}, {"_id": 0}).sort("name", 1).to_list(500)
 
 
@@ -648,7 +719,7 @@ async def restore_store(sid_: str, request: Request, user=Depends(require_write)
 
 # ---- Store domains ----
 @api.get("/admin/stores/{sid_}/domains")
-async def list_domains(sid_: str, user=Depends(get_current_user)):
+async def list_domains(sid_: str, user=Depends(require_any_role)):
     return await db.store_domains.find({"store_id": sid_}, {"_id": 0}).to_list(200)
 
 
@@ -676,7 +747,7 @@ async def delete_domain(did: str, request: Request, user=Depends(require_write))
 
 # ---- Categories ----
 @api.get("/admin/categories")
-async def admin_categories(user=Depends(get_current_user)):
+async def admin_categories(user=Depends(require_any_role)):
     return await db.categories.find({}, {"_id": 0}).sort("sort_order", 1).to_list(500)
 
 
@@ -728,7 +799,7 @@ async def restore_category(cid: str, request: Request, user=Depends(require_writ
 
 # ---- Category keywords ----
 @api.get("/admin/keywords")
-async def admin_keywords(user=Depends(get_current_user)):
+async def admin_keywords(user=Depends(require_any_role)):
     return await db.category_keywords.find({}, {"_id": 0}).to_list(5000)
 
 
@@ -793,7 +864,7 @@ def _validate_rate_body(body):
 
 
 @api.get("/admin/rates")
-async def admin_rates(user=Depends(get_current_user), store_id: str = None,
+async def admin_rates(user=Depends(require_any_role), store_id: str = None,
                       platform_id: str = None, customer_type: str = None,
                       status: str = None, include_archived: bool = False):
     q_ = {}
@@ -1095,14 +1166,14 @@ async def import_rollback(body: dict, request: Request, user=Depends(require_wri
 
 
 @api.get("/admin/rates/imports")
-async def list_imports(user=Depends(get_current_user)):
+async def list_imports(user=Depends(require_any_role)):
     return await db.rate_imports.find({}, {"_id": 0}).sort("created_at", -1).to_list(200)
 
 
 # ---- Matrix + CSV ----
 @api.get("/admin/rates/matrix")
 async def rate_matrix(store_id: str, platform_id: str, customer_type: str = "existing",
-                      user=Depends(get_current_user)):
+                      user=Depends(require_any_role)):
     cats = await db.categories.find({"archived_at": None}, {"_id": 0}).sort("sort_order", 1).to_list(500)
     rates = await db.rate_cards.find({
         "store_id": store_id, "platform_id": platform_id, "customer_type": customer_type,
@@ -1129,7 +1200,7 @@ async def rate_matrix(store_id: str, platform_id: str, customer_type: str = "exi
 
 @api.get("/admin/rates/export.csv")
 async def export_csv(store_id: str, platform_id: str, customer_type: str = "existing",
-                     user=Depends(get_current_user)):
+                     user=Depends(require_any_role)):
     data = await rate_matrix(store_id, platform_id, customer_type, user)
     out = io.StringIO()
     w = csv.writer(out)

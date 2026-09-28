@@ -11,6 +11,8 @@ import { About, Mission, HowItWorks, Privacy, Terms, AffiliateDisclosure, Cashba
 import { FeedbackPage } from "@/pages/FeedbackPage";
 import { Brands, Categories, Deals } from "@/pages/discovery";
 import Bridge from "@/pages/Bridge";
+import Login from "@/pages/auth/Login";
+import Signup from "@/pages/auth/Signup";
 
 import AdminLogin from "@/pages/admin/AdminLogin";
 import AdminLayout from "@/pages/admin/AdminLayout";
@@ -48,6 +50,8 @@ export default function App() {
             </Route>
 
             <Route path="/go/:partner" element={<Bridge />} />
+            <Route path="/login" element={<Login />} />
+            <Route path="/signup" element={<Signup />} />
 
             <Route path="/admin/login" element={<AdminLogin />} />
             <Route path="/admin" element={<AdminLayout />}>

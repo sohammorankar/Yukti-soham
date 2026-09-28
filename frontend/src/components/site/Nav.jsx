@@ -1,7 +1,8 @@
 import React, { useState } from "react";
-import { Link, useLocation } from "react-router-dom";
-import { Menu, X, Lock, Palette, Flame } from "lucide-react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Menu, X, Lock, Palette, Flame, LogIn, LogOut, UserRound } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
+import { useAuth } from "@/context/AuthContext";
 import { Logo } from "@/components/site/Logo";
 
 const LINKS = [
@@ -16,7 +17,12 @@ const LINKS = [
 export function Nav({ onOpenMandir }) {
   const [open, setOpen] = useState(false);
   const { reopenSelector } = useTheme();
+  const { isAuthed, user, logout } = useAuth();
   const loc = useLocation();
+  const navigate = useNavigate();
+
+  const firstName = (user?.full_name || user?.name || user?.email || "").split(/[\s@]/)[0];
+  const handleLogout = async () => { await logout(); setOpen(false); navigate("/"); };
 
   return (
     <header className="sticky top-0 z-40 glass" data-testid="site-nav">
@@ -55,6 +61,25 @@ export function Nav({ onOpenMandir }) {
           >
             <Palette className="h-4 w-4" />
           </button>
+
+          {isAuthed ? (
+            <div className="hidden items-center gap-2 sm:flex">
+              <span data-testid="nav-user"
+                className="inline-flex h-9 items-center gap-1.5 rounded-full border border-border px-3 text-sm text-ink">
+                <UserRound className="h-4 w-4 text-gold" /> Hi, {firstName}
+              </span>
+              <button onClick={handleLogout} data-testid="nav-logout" title="Log out"
+                className="focus-ring grid h-9 w-9 place-items-center rounded-full border border-border text-ink-muted transition-colors hover:text-destructive">
+                <LogOut className="h-4 w-4" />
+              </button>
+            </div>
+          ) : (
+            <Link to="/login" data-testid="nav-login"
+              className="focus-ring hidden h-9 items-center gap-1.5 rounded-full border border-border px-3 text-sm text-ink-muted transition-colors hover:text-gold sm:flex">
+              <LogIn className="h-3.5 w-3.5" /> Log in
+            </Link>
+          )}
+
           <Link
             to="/admin/login"
             data-testid="nav-rate-console"
@@ -84,6 +109,21 @@ export function Nav({ onOpenMandir }) {
             ))}
             <Link to="/admin/login" onClick={() => setOpen(false)}
               className="rounded-md px-3 py-2 text-sm text-gold">Rate Console</Link>
+            <div className="my-1 border-t border-border" />
+            {isAuthed ? (
+              <>
+                <span data-testid="nav-user-mobile" className="px-3 py-2 text-sm text-ink">Hi, {firstName}</span>
+                <button onClick={handleLogout} data-testid="nav-logout-mobile"
+                  className="rounded-md px-3 py-2 text-left text-sm text-ink-muted hover:text-destructive">Log out</button>
+              </>
+            ) : (
+              <>
+                <Link to="/login" onClick={() => setOpen(false)} data-testid="nav-login-mobile"
+                  className="rounded-md px-3 py-2 text-sm text-ink-muted hover:text-gold">Log in</Link>
+                <Link to="/signup" onClick={() => setOpen(false)} data-testid="nav-signup-mobile"
+                  className="rounded-md px-3 py-2 text-sm text-gold">Create account</Link>
+              </>
+            )}
           </div>
         </div>
       )}

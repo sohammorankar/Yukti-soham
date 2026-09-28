@@ -32,16 +32,28 @@ export function AuthProvider({ children }) {
     }
   };
 
+  const register = async (payload) => {
+    try {
+      const { data } = await api.post("/auth/register", payload);
+      if (data.access_token) localStorage.setItem("yc_token", data.access_token);
+      setUser(data);
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: formatApiErrorDetail(e.response?.data?.detail) || e.message };
+    }
+  };
+
   const logout = async () => {
-    try { await api.post("/auth/logout"); } catch {}
+    try { await api.post("/auth/logout"); } catch { /* ignore logout errors */ }
     localStorage.removeItem("yc_token");
     setUser(false);
   };
 
   const isAdmin = !!(user && user.roles && user.roles.length);
+  const isAuthed = !!(user && user.email);
 
   return (
-    <AuthContext.Provider value={{ user, ready, login, logout, isAdmin }}>
+    <AuthContext.Provider value={{ user, ready, login, register, logout, isAdmin, isAuthed }}>
       {children}
     </AuthContext.Provider>
   );

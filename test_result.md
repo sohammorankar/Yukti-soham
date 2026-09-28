@@ -152,16 +152,39 @@ frontend:
 
 metadata:
   created_by: "main_agent"
-  version: "1.4"
-  test_sequence: 4
+  version: "1.5"
+  test_sequence: 5
   run_ui: true
 
 test_plan:
   current_focus:
-    - "STEP 3B — YuktiMagic bridge page + backend-controlled partner redirect"
+    - "STEP 4A — Shopper signup, login & guest access"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
+
+agent_communication:
+    -agent: "main"
+    -message: "STEP 4A — Test ONLY shopper signup/login/guest (no admin regression beyond the protection check). Backend: NEW POST /api/auth/register creates a ROLELESS shopper and auto-logs in (curl-verified: roleless, no hash leak, dup email 409, invalid email 422, invalid mobile/weak password 422, login ok, wrong pass 401). Admin READ endpoints now require a non-empty role (curl-verified: shopper GET /admin/platforms=403, owner=200, anon=401). Shopper still gets /auth/me=200 and can calculate. Frontend: NEW /login (testids login-email-input, login-password-input, login-submit-button, login-register-link, continue-as-guest) and /signup (testids register-name-input, register-gender + register-gender-<val>, register-mobile-input, register-email-input, register-password-input, register-submit-button, register-login-link, continue-as-guest; inline errors register-*-error). Nav shows nav-login when anon, and nav-user + nav-logout when signed in (mobile: nav-login-mobile/nav-signup-mobile/nav-logout-mobile). TEST STEPS: (1) Valid signup at /signup: Full Name 'Test Shopper', gender Female radio, mobile 9123456780, unique email like qa+<rand>@example.com, password 'Shop1234' → submit → lands on homepage, Nav shows 'Hi, Test' + logout. (2) Missing mandatory field: clear mobile → submit → inline required error, no navigation. (3) Invalid email 'abc' → inline email error. (4) Invalid mobile '12345' → inline mobile error. (5) Weak password 'short' → inline password error. (6) Duplicate email: sign up again with asha@example.com → server error 'account with this email already exists' shown. (7) Login at /login with asha@example.com / Shop1234 → success, Nav shows logged-in state. (8) Incorrect password → error message, stays on login. (9) Guest access: from /login or /signup click 'Continue as Guest' → goes to homepage and Savings Engine usable. (10) Guest can calculate: on homepage (not logged in), paste Firstcry URL https://www.firstcry.com/product/123, MRP 1599 price 1338 Existing → Calculate → results with extra ₹88 / final ₹1,251. (11) Logged-in shopper can calculate: log in then run the same Firstcry calc → results render. (12) Normal shopper cannot access admin: while logged in as shopper, visit /admin → should redirect to /admin/login (not the dashboard) because shopper has no roles. (13) No password/hash leakage: check that no network response or UI exposes password_hash. (14) Mobile layout 390x844 for /signup and /login (no overflow). (15) Desktop layout 1920x1080. (16) No JS console errors. Shopper creds available in /app/memory/test_credentials.md (asha@example.com / Shop1234). Do NOT change savings engine/detection/partner/bridge."
+    -agent: "testing"
+    -message: "STEP 4A TESTING COMPLETE ✅ ALL 16 TESTS PASSED. Shopper authentication (signup, login, guest access) is fully functional and production-ready. All validation (inline and server-side) working correctly. Admin protection verified. No security issues (password/hash leakage). Responsive design verified on mobile and desktop. No JavaScript errors. Main agent can summarize and finish STEP 4A."
+
+# ---- STEP 4A task record ----
+step_4a:
+  - task: "STEP 4A — Shopper signup, login & guest access"
+    implemented: true
+    working: true
+    file: "backend/server.py, frontend/src/context/AuthContext.jsx, frontend/src/pages/auth/Login.jsx, frontend/src/pages/auth/Signup.jsx, frontend/src/components/site/Nav.jsx, frontend/src/App.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        -working: "NA"
+        -agent: "main"
+        -comment: "Backend: added POST /api/auth/register (roleless shopper, auto-login via existing JWT cookies+bearer, bcrypt reuse, India mobile + password validation, dup-email 409, no hash in response). Added require_any_role guard and applied it to all admin READ endpoints (previously Depends(get_current_user)) so roleless shoppers get 403 on admin reads — aligns with the documented security model and keeps admin protected; write endpoints already required roles. NO changes to calculate/detect/partner/bridge/engine/rate-cards/admin-login. Reused existing users collection; added full_name/gender/mobile fields on the user doc (Mongo schemaless, no migration). Frontend: AuthContext gains register() + isAuthed; new /login and /signup shopper pages (design-system styled, responsive, radio gender, inline validation, 'Continue as Guest'); Nav shows login vs logged-in name+logout (desktop + mobile). curl verification all passed (signup roleless + no hash, dup 409, invalid email 422, invalid mobile/weak pw 422, login ok, wrong pw 401, shopper admin read 403, owner 200, anon 401, guest calculate 88/1251)."
+        -working: true
+        -agent: "testing"
+        -comment: "✅ COMPREHENSIVE TESTING COMPLETED - ALL 16 TESTS PASSED. (1) Valid signup: Created account with unique email qa72400@example.com, navigated to homepage, Nav shows 'Hi, Test' with logout button. (2) Missing mobile: Inline error 'Mobile number is required' shown, stayed on signup page. (3) Invalid email 'abc': Inline error 'Enter a valid email address' shown. (4) Invalid mobile '12345': Inline error 'Enter a valid 10-digit Indian mobile number' shown. (5) Password validation 'short': Inline error 'At least 8 characters' shown. (6) Duplicate email asha@example.com: Server error 'An account with this email already exists' shown, stayed on signup page. (7) Successful login with asha@example.com/Shop1234: Navigated to homepage, Nav shows 'Hi, Asha' with logout. (8) Incorrect password 'WrongPass9': Login error 'Invalid email or password' shown, stayed on login page. (9) Guest access: Clicked 'Continue as Guest' from login, navigated to homepage, Savings Engine visible. (10) Guest calculation: Firstcry URL https://www.firstcry.com/product/123, MRP=1599, price=1338, Existing customer → Results: ₹88 extra saved, ₹1,251 final bill (CORRECT). (11) Logged-in shopper calculation: Same Firstcry calculation after login → Results: ₹88 extra, ₹1,251 final (CORRECT). (12) Shopper admin protection: Navigated to /admin while logged in as shopper → Correctly redirected to /admin/login (shopper has no roles). (13) No password/hash leakage: Inspected 35 network responses during signup/login flows - NO password_hash or plaintext password found in any response. (14) Mobile layout (390x844): Signup and login pages render cleanly with no horizontal overflow. (15) Desktop layout (1920x1080): Signup and login pages render cleanly with no horizontal overflow. (16) Console errors: 0 JavaScript errors detected (only expected 401 auth checks for anonymous users). All testids working correctly (register-*, login-*, nav-user, nav-logout, continue-as-guest, input-url, btn-calculate, result-extra-saved, result-final-bill). Feature is production-ready."
 
 agent_communication:
     -agent: "main"
