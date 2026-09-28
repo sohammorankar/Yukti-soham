@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { Menu, X, Lock, Palette, Flame, LogIn, LogOut, UserRound } from "lucide-react";
+import { Menu, X, Lock, Palette, Flame, LogIn, LogOut, UserRound, CreditCard } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
 import { useAuth } from "@/context/AuthContext";
 import { Logo } from "@/components/site/Logo";
@@ -64,6 +64,10 @@ export function Nav({ onOpenMandir }) {
 
           {isAuthed ? (
             <div className="hidden items-center gap-2 sm:flex">
+              <Link to="/account/cards" data-testid="nav-my-cards" title="My Cards & Offers"
+                className="focus-ring inline-flex h-9 items-center gap-1.5 rounded-full border border-border px-3 text-sm text-ink-muted transition-colors hover:text-gold">
+                <CreditCard className="h-4 w-4 text-gold" /> My Cards
+              </Link>
               <span data-testid="nav-user"
                 className="inline-flex h-9 items-center gap-1.5 rounded-full border border-border px-3 text-sm text-ink">
                 <UserRound className="h-4 w-4 text-gold" /> Hi, {firstName}
@@ -113,6 +117,8 @@ export function Nav({ onOpenMandir }) {
             {isAuthed ? (
               <>
                 <span data-testid="nav-user-mobile" className="px-3 py-2 text-sm text-ink">Hi, {firstName}</span>
+                <Link to="/account/cards" onClick={() => setOpen(false)} data-testid="nav-my-cards-mobile"
+                  className="rounded-md px-3 py-2 text-sm text-ink-muted hover:text-gold">My Cards &amp; Offers</Link>
                 <button onClick={handleLogout} data-testid="nav-logout-mobile"
                   className="rounded-md px-3 py-2 text-left text-sm text-ink-muted hover:text-destructive">Log out</button>
               </>

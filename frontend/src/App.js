@@ -13,6 +13,7 @@ import { Brands, Categories, Deals } from "@/pages/discovery";
 import Bridge from "@/pages/Bridge";
 import Login from "@/pages/auth/Login";
 import Signup from "@/pages/auth/Signup";
+import MyCards from "@/pages/MyCards";
 
 import AdminLogin from "@/pages/admin/AdminLogin";
 import AdminLayout from "@/pages/admin/AdminLayout";
@@ -47,6 +48,7 @@ export default function App() {
               <Route path="/faq" element={<FAQ />} />
               <Route path="/report-rate" element={<FeedbackPage kind="report_rate" />} />
               <Route path="/suggest" element={<FeedbackPage kind="suggest_store" />} />
+              <Route path="/account/cards" element={<MyCards />} />
             </Route>
 
             <Route path="/go/:partner" element={<Bridge />} />

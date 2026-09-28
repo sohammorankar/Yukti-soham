@@ -192,6 +192,29 @@ class RegisterBody(BaseModel):
         return v
 
 
+CARD_TYPES = ("Credit", "Debit")
+CARD_NETWORKS = ("Visa", "Mastercard", "RuPay", "American Express", "Other")
+
+
+class CardBody(BaseModel):
+    """Shopper card-profile preferences. ONLY offer-relevant attributes are
+    accepted — card numbers, CVV, expiry, PINs, OTPs and any other credential
+    fields are explicitly forbidden and never stored."""
+    model_config = {"extra": "forbid"}
+
+    bank_name: str = Field(min_length=1, max_length=80)
+    card_type: Literal["Credit", "Debit"]
+    card_network: Literal["Visa", "Mastercard", "RuPay", "American Express", "Other"]
+
+    @field_validator("bank_name")
+    @classmethod
+    def clean_bank(cls, v):
+        v = re.sub(r"\s+", " ", (v or "")).strip()
+        if not v:
+            raise ValueError("Bank name is required")
+        return v
+
+
 class CalcBody(BaseModel):
     store_id: Optional[str] = None
     store_name: Optional[str] = None
@@ -241,6 +264,8 @@ async def startup():
     await db.users.create_index("id", unique=True)
     await db.user_roles.create_index([("user_id", 1), ("role", 1)], unique=True)
     await db.login_attempts.create_index("identifier")
+    await db.card_profiles.create_index("id", unique=True)
+    await db.card_profiles.create_index("user_id")
     for coll in ["platforms", "stores", "categories", "rate_cards"]:
         await db[coll].create_index("id", unique=True)
     await db.store_domains.create_index("domain_or_alias", unique=True)
@@ -371,6 +396,84 @@ async def refresh_token(request: Request, response: Response):
     access = create_access_token(user["id"], user["email"])
     response.set_cookie("access_token", access, httponly=True, secure=True,
                         samesite="none", max_age=8 * 3600, path="/")
+    return {"ok": True}
+
+
+# --------------------------------------------------------------------------
+# Shopper card profiles ("My Cards & Offers" — Phase 1)
+# Preferences ONLY: bank name, card type, card network. No card numbers, CVV,
+# expiry, PINs or any credentials are accepted or stored. Every document is
+# owned by exactly one shopper (user_id) and all queries are owner-scoped, so
+# no shopper can read, modify or delete another shopper's cards. These
+# profiles are NOT read by /api/calculate and have no effect on savings math.
+# --------------------------------------------------------------------------
+
+CARD_PROJECTION = {"_id": 0, "id": 1, "bank_name": 1, "card_type": 1, "card_network": 1, "created_at": 1}
+
+
+def _norm_bank(v: str) -> str:
+    return re.sub(r"\s+", " ", (v or "")).strip().lower()
+
+
+async def _find_duplicate_card(user_id: str, body: CardBody, exclude_id: str = None):
+    """Simple server-side duplicate guard: same bank + type + network for the
+    same owner counts as a duplicate (bank compared case/spacing-insensitively)."""
+    query = {"user_id": user_id, "card_type": body.card_type, "card_network": body.card_network}
+    if exclude_id:
+        query["id"] = {"$ne": exclude_id}
+    candidates = await db.card_profiles.find(query, {"_id": 0}).to_list(200)
+    target = _norm_bank(body.bank_name)
+    return next((c for c in candidates if _norm_bank(c.get("bank_name")) == target), None)
+
+
+@api.get("/cards")
+async def list_cards(user: dict = Depends(get_current_user)):
+    """List the authenticated shopper's own card profiles (owner-scoped)."""
+    return await db.card_profiles.find(
+        {"user_id": user["id"]}, CARD_PROJECTION).sort("created_at", 1).to_list(200)
+
+
+@api.post("/cards", status_code=201)
+async def create_card(body: CardBody, user: dict = Depends(get_current_user)):
+    """Save a card preference profile for the authenticated shopper."""
+    if await _find_duplicate_card(user["id"], body):
+        raise HTTPException(status_code=409, detail="This card profile is already saved")
+    now = now_iso()
+    doc = {
+        "id": str(uuid.uuid4()),
+        "user_id": user["id"],
+        "bank_name": body.bank_name,
+        "card_type": body.card_type,
+        "card_network": body.card_network,
+        "created_at": now,
+        "updated_at": now,
+    }
+    await db.card_profiles.insert_one(doc)
+    return {k: doc[k] for k in ("id", "bank_name", "card_type", "card_network", "created_at")}
+
+
+@api.put("/cards/{card_id}")
+async def update_card(card_id: str, body: CardBody, user: dict = Depends(get_current_user)):
+    """Update a card profile — only if it belongs to the authenticated shopper."""
+    owned = await db.card_profiles.find_one({"id": card_id, "user_id": user["id"]})
+    if not owned:
+        raise HTTPException(status_code=404, detail="Card not found")
+    if await _find_duplicate_card(user["id"], body, exclude_id=card_id):
+        raise HTTPException(status_code=409, detail="This card profile is already saved")
+    await db.card_profiles.update_one(
+        {"id": card_id, "user_id": user["id"]},
+        {"$set": {"bank_name": body.bank_name, "card_type": body.card_type,
+                  "card_network": body.card_network, "updated_at": now_iso()}})
+    doc = await db.card_profiles.find_one({"id": card_id, "user_id": user["id"]}, CARD_PROJECTION)
+    return doc
+
+
+@api.delete("/cards/{card_id}")
+async def delete_card(card_id: str, user: dict = Depends(get_current_user)):
+    """Delete a card profile — only if it belongs to the authenticated shopper."""
+    res = await db.card_profiles.delete_one({"id": card_id, "user_id": user["id"]})
+    if not res.deleted_count:
+        raise HTTPException(status_code=404, detail="Card not found")
     return {"ok": True}
 
 
