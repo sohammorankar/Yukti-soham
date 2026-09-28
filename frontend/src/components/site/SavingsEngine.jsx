@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { Link2, Store, Tags, Calculator, Info, BadgeCheck, HelpCircle, Frown, Smile } from "lucide-react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { Link2, Store, Tags, Calculator, Info, BadgeCheck, HelpCircle, Frown, Smile, Loader2 } from "lucide-react";
 import { Combobox } from "@/components/Combobox";
 import {
   Tooltip, TooltipContent, TooltipProvider, TooltipTrigger,
@@ -7,6 +7,14 @@ import {
 import { api } from "@/lib/api";
 import { money } from "@/lib/format";
 import { toast } from "sonner";
+
+// Lightweight check so we only call /api/detect when the URL is "complete enough".
+// Requires a domain-like token (something.tld) — avoids firing on partial typing.
+function looksLikeUrl(val) {
+  const v = (val || "").trim();
+  if (v.length < 4) return false;
+  return /(^https?:\/\/)?([a-z0-9-]+\.)+[a-z]{2,}(\/|$|\?|#)/i.test(v);
+}
 
 export function SavingsEngine({ onResult, initial }) {
   const [stores, setStores] = useState([]);
@@ -22,6 +30,10 @@ export function SavingsEngine({ onResult, initial }) {
   const [detectedCategory, setDetectedCategory] = useState(null);
   const [loading, setLoading] = useState(false);
   const [lastResult, setLastResult] = useState(null);
+  const [detecting, setDetecting] = useState(false);
+  const [detectError, setDetectError] = useState("");
+  const [detectedStoreName, setDetectedStoreName] = useState(null);
+  const lastDetectedUrlRef = useRef("");
 
   useEffect(() => {
     (async () => {
@@ -47,18 +59,55 @@ export function SavingsEngine({ onResult, initial }) {
   const isAmazonFlipkart = amazonFlipkart ||
     ["amazon", "flipkart"].includes((selectedStore?.name || "").toLowerCase());
 
-  const runDetect = async () => {
-    if (!url.trim()) return;
+  const runDetect = async (raw) => {
+    const target = ((raw ?? url) || "").trim();
+    if (!target) return;
+    if (!looksLikeUrl(target)) {
+      setDetectError("That doesn't look like a valid product link. You can still choose the store and category manually below.");
+      return;
+    }
+    if (target === lastDetectedUrlRef.current) return; // avoid duplicate calls for the same URL
+    lastDetectedUrlRef.current = target;
+    setDetecting(true);
+    setDetectError("");
     try {
-      const { data } = await api.post("/detect", { url });
-      setDetection(data.category);
-      setAmazonFlipkart(data.amazon_flipkart_notice);
-      if (data.store?.store_id) setStoreId(data.store.store_id);
+      const { data } = await api.post("/detect", { url: target });
+      setAmazonFlipkart(!!data.amazon_flipkart_notice);
+      if (data.store?.store_id) {
+        setStoreId(data.store.store_id);
+        setDetectedStoreName(data.store.store_name || null);
+      } else {
+        setDetectedStoreName(null);
+      }
       if (data.category?.category) {
+        setDetection(data.category);
         setCategory(data.category.category);
         setDetectedCategory(data.category.category);
+      } else {
+        setDetection(null);
       }
-    } catch { /* ignore */ }
+      if (!data.store?.store_id && !data.category?.category) {
+        setDetectError("We couldn't recognize this link automatically. Please choose the store and category manually below.");
+      }
+    } catch {
+      lastDetectedUrlRef.current = ""; // allow a retry on a transient failure
+      setDetectError("We couldn't detect this link right now. Please choose the store and category manually below.");
+    } finally {
+      setDetecting(false);
+    }
+  };
+
+  // Auto-detect after a short debounce once the URL looks complete (no Detect button needed).
+  useEffect(() => {
+    const v = (url || "").trim();
+    if (!v || !looksLikeUrl(v) || v === lastDetectedUrlRef.current) return;
+    const t = setTimeout(() => runDetect(v), 700);
+    return () => clearTimeout(t);
+  }, [url]);
+
+  const onStoreChange = (val) => {
+    setStoreId(val);
+    setDetectedStoreName(null); // manual override clears the "detected" hint
   };
 
   const onCategoryChange = (val) => {
@@ -91,23 +140,35 @@ export function SavingsEngine({ onResult, initial }) {
   return (
     <TooltipProvider delayDuration={150}>
       <div className="surface rounded-2xl p-5 sm:p-7" data-testid="savings-engine">
-        {/* URL */}
+        {/* URL — auto-detects store & category (debounced + on blur); no button needed */}
         <label className="mb-1.5 block text-xs font-600 uppercase tracking-wide text-ink-muted">Product URL</label>
-        <div className="flex gap-2">
-          <div className="relative flex-1">
-            <Link2 className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-muted" />
-            <input
-              value={url} onChange={(e) => setUrl(e.target.value)} onBlur={runDetect}
-              placeholder="Paste an Amazon, Flipkart, Myntra… product link"
-              data-testid="input-url"
-              className="focus-ring h-11 w-full rounded-md border border-border bg-input pl-9 pr-3 text-sm text-foreground"
-            />
-          </div>
-          <button onClick={runDetect} data-testid="btn-detect"
-            className="focus-ring h-11 shrink-0 rounded-md border border-gold/40 px-4 text-sm text-gold hover:bg-gold/10">
-            Detect
-          </button>
+        <div className="relative">
+          <Link2 className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-muted" />
+          <input
+            value={url}
+            onChange={(e) => { setUrl(e.target.value); if (detectError) setDetectError(""); }}
+            onBlur={() => runDetect()}
+            placeholder="Paste an Amazon, Flipkart, Myntra… product link"
+            data-testid="input-url"
+            className="focus-ring h-11 w-full rounded-md border border-border bg-input pl-9 pr-10 text-sm text-foreground"
+          />
+          {detecting && (
+            <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-gold" data-testid="detect-loading" />
+          )}
         </div>
+        {detecting && (
+          <p className="mt-1.5 text-[11px] text-ink-muted" data-testid="detect-status">Detecting store &amp; category…</p>
+        )}
+        {detectError && !detecting && (
+          <p className="mt-1.5 flex items-start gap-1 text-[11px] text-amber-400" data-testid="detect-error">
+            <Info className="mt-0.5 h-3 w-3 shrink-0" /> {detectError}
+          </p>
+        )}
+        {detectedStoreName && !detectError && !detecting && (
+          <p className="mt-1.5 flex items-center gap-1 text-[11px] text-savings" data-testid="detect-store">
+            <BadgeCheck className="h-3 w-3" /> Detected store: {detectedStoreName}
+          </p>
+        )}
 
         <div className="mt-5 grid gap-4 sm:grid-cols-2">
           {/* Store */}
@@ -115,7 +176,7 @@ export function SavingsEngine({ onResult, initial }) {
             <label className="mb-1.5 flex items-center gap-1.5 text-xs font-600 uppercase tracking-wide text-ink-muted">
               <Store className="h-3.5 w-3.5" /> Store
             </label>
-            <Combobox options={storeOptions} value={storeId} onChange={setStoreId}
+            <Combobox options={storeOptions} value={storeId} onChange={onStoreChange}
               placeholder="Choose store" testid="select-store" ariaLabel="Select store" />
           </div>
 
@@ -150,7 +211,7 @@ export function SavingsEngine({ onResult, initial }) {
             <span>
               Amazon and Flipkart frequently change product classifications and affiliate commission
               rates. YuktiCart selects the best category match available, but cannot guarantee the
-              retailer's final classification or cashback. Please verify the category and rate before purchase.
+              retailer&apos;s final classification or cashback. Please verify the category and rate before purchase.
             </span>
           </div>
         )}
