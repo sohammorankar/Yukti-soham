@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { motion } from "framer-motion";
 import {
   CheckCircle2, XCircle, AlertTriangle, TrendingUp, Receipt, Layers, Info,
-  ChevronDown, ExternalLink, ArrowUpRight, Store as StoreIcon,
+  ChevronDown, ArrowUpRight, Store as StoreIcon, Star, Gift, Percent,
 } from "lucide-react";
 import { money, moneyExact } from "@/lib/format";
 import { EmotionalPanel } from "@/components/site/EmotionalPanel";
@@ -112,8 +112,9 @@ export function ResultsView({ result }) {
           <RouteCard route={result.gift_card} label="Gift card discount" />
         </div>
 
-        {/* Affiliate partner comparison + CTA */}
-        <AffiliatePartners result={result} />
+        {/* Applicable partners + Yukti-suggested CTA (affiliate & gift card) */}
+        <PartnerSection result={result} side="affiliate" />
+        <PartnerSection result={result} side="gift_card" />
 
         {/* Yukti Approved receipt */}
         {s.extra_saved.rupees > 0 && <ReceiptStamp result={result} />}
@@ -166,74 +167,110 @@ export function ResultsView({ result }) {
   );
 }
 
-function AffiliatePartners({ result }) {
+function PartnerSection({ result, side }) {
   const [open, setOpen] = useState(false);
-  const aff = result.affiliate;
-  const preferred = aff?.best;
-  const options = aff?.options || [];
+  const isAff = side === "affiliate";
+  const route = result[side];
+  const preferred = route?.best;
+  const options = route?.options || [];
   const eligible = options.filter((o) => o.eligible && Number(o.saving.exact) > 0);
-  const preferredUrl = result.preferred_affiliate_url || preferred?.platform_url;
 
   if (!preferred) return null;
 
+  // Yukti's suggested partner IS the route the engine selected (route.best). We do
+  // NOT re-rank on the frontend — we only surface the engine's choice.
+  const preferredUrl = isAff
+    ? (result.preferred_affiliate_url || preferred.platform_url)
+    : preferred.platform_url;
+
+  const label = isAff ? "Affiliate partners" : "Gift card partners";
+  const SectionIcon = isAff ? Percent : Gift;
+  const verb = isAff ? "Continue via" : "Buy gift card via";
+  const sectionTestId = isAff ? "affiliate-partners" : "giftcard-partners";
+  const ctaTestId = isAff ? "cta-continue-affiliate" : "cta-continue-giftcard";
+  const toggleTestId = isAff ? "toggle-partners" : "toggle-giftcard-partners";
+  const listTestId = isAff ? "partners-list" : "giftcard-partners-list";
+  const rowPrefix = isAff ? "partner" : "giftcard-partner";
+  const fmtRate = (o) => (o.value_type === "percent" ? `${o.value}%` : `₹${o.value}`);
+
   return (
-    <div className="surface rounded-xl p-5" data-testid="affiliate-partners">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h5 className="font-display text-base font-600 text-ink">
-            Yukti-preferred partner: <span className="gold-text">{preferred.platform_name}</span>
-          </h5>
-          <p className="text-xs text-ink-muted">
-            Highest eligible cashback ({preferred.value_type === "percent" ? `${preferred.value}%` : `₹${preferred.value}`} · saves {money(preferred.saving)})
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          {preferredUrl && (
-            <a href={preferredUrl} target="_blank" rel="noopener noreferrer" data-testid="cta-continue-affiliate"
-              className="btn-gold focus-ring inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-sm font-700">
-              Continue via {preferred.platform_name} <ArrowUpRight className="h-4 w-4" />
-            </a>
-          )}
-          {result.store_url && (
-            <a href={result.store_url} target="_blank" rel="noopener noreferrer" data-testid="cta-open-store"
-              className="focus-ring inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-2 text-xs text-ink-muted hover:text-gold">
-              <StoreIcon className="h-3.5 w-3.5" /> Open store
-            </a>
-          )}
-        </div>
+    <div className="surface rounded-xl p-5" data-testid={sectionTestId}>
+      <div className="mb-3 flex items-center gap-2">
+        <SectionIcon className="h-4 w-4 text-gold" />
+        <h5 className="font-display text-base font-600 text-ink">{label}</h5>
       </div>
 
-      <button onClick={() => setOpen((v) => !v)} data-testid="toggle-partners"
-        className="focus-ring mt-3 inline-flex items-center gap-1.5 text-sm text-gold hover:underline">
-        <ChevronDown className={`h-4 w-4 transition-transform ${open ? "rotate-180" : ""}`} />
-        {open ? "Hide" : "Compare"} all affiliate partners ({eligible.length})
-      </button>
-
-      {open && (
-        <div className="mt-3 space-y-2" data-testid="partners-list">
-          {options.map((o) => (
-            <div key={o.rate_id}
-              className={`flex items-center justify-between rounded-lg border p-3 ${
-                o.is_best ? "border-gold/50 bg-gold/5" : "border-border"} ${!o.eligible ? "opacity-50" : ""}`}
-              data-testid={`partner-${o.platform_name.toLowerCase().replace(/[^a-z]+/g, "-")}`}>
-              <div className="flex items-center gap-3">
-                <span className="text-sm font-600 text-ink">{o.platform_name}</span>
-                {o.is_best && <span className="rounded-full bg-gold/15 px-2 py-0.5 text-[10px] text-gold">Preferred</span>}
-                {!o.eligible && <span className="text-[10px] text-ink-muted">{o.reasons?.[0] || "Not eligible"}</span>}
-              </div>
-              <div className="flex items-center gap-4">
-                <span className="text-sm text-ink-muted">{o.value_type === "percent" ? `${o.value}%` : `₹${o.value}`}</span>
-                <span className="savings-text font-600">{money(o.saving)}</span>
-                {o.platform_url && (
-                  <a href={o.platform_url} target="_blank" rel="noopener noreferrer"
-                    className="text-ink-muted hover:text-gold" aria-label={`Open ${o.platform_name}`}>
-                    <ExternalLink className="h-4 w-4" />
-                  </a>
-                )}
-              </div>
-            </div>
-          ))}
+      {/* Yukti-suggested partner header + the ONLY actionable redirect CTA */}
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-gold/50 bg-gold/5 p-3">
+        <div className="min-w-0">
+          <p className="flex items-center gap-1.5 text-sm font-600 text-ink">
+            <Star className="h-4 w-4 shrink-0 fill-gold text-gold" />
+            Yukti Suggested: <span className="gold-text">{preferred.platform_name}</span>
+          </p>
+          <p className="mt-0.5 text-xs text-ink-muted">
+            {fmtRate(preferred)} · saves {money(preferred.saving)}
+          </p>
         </div>
+        {preferredUrl ? (
+          <a href={preferredUrl} target="_blank" rel="noopener noreferrer" data-testid={ctaTestId}
+            className="btn-gold focus-ring inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-sm font-700">
+            {verb} {preferred.platform_name} <ArrowUpRight className="h-4 w-4" />
+          </a>
+        ) : (
+          <span data-testid={`${ctaTestId}-unavailable`}
+            className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-2 text-xs text-ink-muted">
+            <Info className="h-3.5 w-3.5" /> Redirect link not configured — follow checkout steps
+          </span>
+        )}
+      </div>
+
+      {/* Affiliate side keeps the existing "Open store" convenience link */}
+      {isAff && result.store_url && (
+        <div className="mt-2">
+          <a href={result.store_url} target="_blank" rel="noopener noreferrer" data-testid="cta-open-store"
+            className="focus-ring inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs text-ink-muted hover:text-gold">
+            <StoreIcon className="h-3.5 w-3.5" /> Open store
+          </a>
+        </div>
+      )}
+
+      {/* Other applicable partners — informational only (no redirect CTA) */}
+      {options.length > 1 && (
+        <>
+          <button onClick={() => setOpen((v) => !v)} data-testid={toggleTestId}
+            className="focus-ring mt-3 inline-flex items-center gap-1.5 text-sm text-gold hover:underline">
+            <ChevronDown className={`h-4 w-4 transition-transform ${open ? "rotate-180" : ""}`} />
+            {open ? "Hide" : "Show"} all {isAff ? "affiliate" : "gift card"} partners ({eligible.length} eligible)
+          </button>
+
+          {open && (
+            <div className="mt-3 space-y-2" data-testid={listTestId}>
+              {options.map((o) => (
+                <div key={o.rate_id}
+                  className={`flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3 ${
+                    o.is_best ? "border-gold/50 bg-gold/5" : "border-border"} ${!o.eligible ? "opacity-50" : ""}`}
+                  data-testid={`${rowPrefix}-${o.platform_name.toLowerCase().replace(/[^a-z]+/g, "-")}`}>
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span className="text-sm font-600 text-ink">{o.platform_name}</span>
+                    {o.is_best ? (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-gold/15 px-2 py-0.5 text-[10px] text-gold">
+                        <Star className="h-2.5 w-2.5 fill-gold" /> Yukti Suggested
+                      </span>
+                    ) : o.eligible ? (
+                      <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] uppercase text-ink-muted">Informational</span>
+                    ) : (
+                      <span className="text-[10px] text-ink-muted">{o.reasons?.[0] || "Not eligible"}</span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <span className="text-sm text-ink-muted">{fmtRate(o)}</span>
+                    <span className="savings-text font-600">{money(o.saving)}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
       )}
     </div>
   );
