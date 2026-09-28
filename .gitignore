@@ -86,6 +86,9 @@ android-sdk/
 .env
 .env.*
 *.env
+# ...but keep example templates tracked for documentation/deploy
+!.env.example
+!**/.env.example
 credentials.json
 *.key
 .credentials
