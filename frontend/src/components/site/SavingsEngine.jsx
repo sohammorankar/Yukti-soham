@@ -235,7 +235,7 @@ export function SavingsEngine({ onResult, initial }) {
                 <option value="">No card selected</option>
                 {myCards.map((c) => (
                   <option key={c.id} value={c.id}>
-                    {c.bank_name} • {c.card_type} • {c.card_network}
+                    {c.card_name ? `${c.card_name} • ${c.card_network}` : `${c.bank_name} • ${c.card_type} • ${c.card_network}`}
                   </option>
                 ))}
               </select>

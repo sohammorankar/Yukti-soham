@@ -9,6 +9,91 @@ from datetime import datetime, timezone
 NS = uuid.UUID("11111111-2222-3333-4444-555555555555")
 
 
+# Curated Indian card-product catalogue (identity only — NO offers/rates).
+# (bank_name, card_name, card_type, card_network). Network is "Other" whenever
+# the issuer offers multiple network variants or the network is uncertain —
+# we never guess. No card numbers, CVV, expiry or PINs anywhere.
+CARD_CATALOGUE = [
+    # SBI Card
+    ("SBI", "SBI Cashback Credit Card", "Credit", "Visa"),
+    ("SBI", "SBI Card ELITE", "Credit", "Other"),
+    ("SBI", "SBI Card PRIME", "Credit", "Other"),
+    ("SBI", "SBI SimplyCLICK Credit Card", "Credit", "Other"),
+    ("SBI", "SBI SimplySAVE Credit Card", "Credit", "Other"),
+    ("SBI", "SBI Gold International Debit Card", "Debit", "Other"),
+    # HDFC Bank
+    ("HDFC Bank", "HDFC Millennia Credit Card", "Credit", "Other"),
+    ("HDFC Bank", "HDFC Regalia Gold Credit Card", "Credit", "Other"),
+    ("HDFC Bank", "HDFC Infinia Credit Card", "Credit", "Visa"),
+    ("HDFC Bank", "HDFC Diners Club Privilege Credit Card", "Credit", "Other"),
+    ("HDFC Bank", "HDFC Diners Club Black Credit Card", "Credit", "Other"),
+    ("HDFC Bank", "HDFC MoneyBack+ Credit Card", "Credit", "Other"),
+    ("HDFC Bank", "HDFC UPI RuPay Credit Card", "Credit", "RuPay"),
+    ("HDFC Bank", "Tata Neu Plus HDFC Bank Credit Card", "Credit", "RuPay"),
+    ("HDFC Bank", "Tata Neu Infinity HDFC Bank Credit Card", "Credit", "RuPay"),
+    ("HDFC Bank", "HDFC EasyShop Platinum Debit Card", "Debit", "Visa"),
+    # ICICI Bank
+    ("ICICI Bank", "ICICI Amazon Pay Credit Card", "Credit", "Visa"),
+    ("ICICI Bank", "ICICI Coral Credit Card", "Credit", "Other"),
+    ("ICICI Bank", "ICICI Rubyx Credit Card", "Credit", "Other"),
+    ("ICICI Bank", "ICICI Platinum Chip Credit Card", "Credit", "Visa"),
+    ("ICICI Bank", "ICICI Sapphiro Credit Card", "Credit", "Other"),
+    # Axis Bank
+    ("Axis Bank", "Axis ACE Credit Card", "Credit", "Visa"),
+    ("Axis Bank", "Axis Flipkart Credit Card", "Credit", "Visa"),
+    ("Axis Bank", "Axis Airtel Credit Card", "Credit", "Visa"),
+    ("Axis Bank", "Axis Atlas Credit Card", "Credit", "Visa"),
+    ("Axis Bank", "Axis Magnus Credit Card", "Credit", "Other"),
+    ("Axis Bank", "Axis My Zone Credit Card", "Credit", "Visa"),
+    # Kotak Mahindra Bank
+    ("Kotak Mahindra Bank", "Kotak League Platinum Credit Card", "Credit", "Visa"),
+    ("Kotak Mahindra Bank", "Kotak Royale Signature Credit Card", "Credit", "Other"),
+    ("Kotak Mahindra Bank", "Kotak 811 #DreamDifferent Credit Card", "Credit", "Other"),
+    # Bank of Baroda
+    ("Bank of Baroda", "BoB Eterna Credit Card", "Credit", "Other"),
+    ("Bank of Baroda", "BoB Premier Credit Card", "Credit", "Other"),
+    ("Bank of Baroda", "BoB Select Credit Card", "Credit", "Other"),
+    # IndusInd Bank
+    ("IndusInd Bank", "IndusInd Platinum Aura Credit Card", "Credit", "Other"),
+    ("IndusInd Bank", "IndusInd Legend Credit Card", "Credit", "Other"),
+    ("IndusInd Bank", "IndusInd Pinnacle Credit Card", "Credit", "Other"),
+    # IDFC FIRST Bank
+    ("IDFC FIRST Bank", "IDFC FIRST Classic Credit Card", "Credit", "Visa"),
+    ("IDFC FIRST Bank", "IDFC FIRST Select Credit Card", "Credit", "Visa"),
+    ("IDFC FIRST Bank", "IDFC FIRST Wealth Credit Card", "Credit", "Visa"),
+    # RBL Bank
+    ("RBL Bank", "RBL ShopRite Credit Card", "Credit", "Other"),
+    ("RBL Bank", "RBL Platinum Maxima Credit Card", "Credit", "Other"),
+    ("RBL Bank", "RBL World Safari Credit Card", "Credit", "Other"),
+    # AU Small Finance Bank
+    ("AU Small Finance Bank", "AU Altura Credit Card", "Credit", "Other"),
+    ("AU Small Finance Bank", "AU Vetta Credit Card", "Credit", "Other"),
+    ("AU Small Finance Bank", "AU Zenith+ Credit Card", "Credit", "Other"),
+    # Yes Bank
+    ("Yes Bank", "YES FIRST Exclusive Credit Card", "Credit", "Other"),
+    ("Yes Bank", "YES Prosperity Edge Credit Card", "Credit", "Other"),
+    # American Express India
+    ("American Express", "American Express Platinum Card", "Credit", "American Express"),
+    ("American Express", "American Express Gold Charge Card", "Credit", "American Express"),
+    ("American Express", "American Express Membership Rewards Credit Card", "Credit", "American Express"),
+    ("American Express", "American Express SmartEarn Credit Card", "Credit", "American Express"),
+    # HSBC India
+    ("HSBC India", "HSBC Cashback Credit Card", "Credit", "Visa"),
+    ("HSBC India", "HSBC Live+ Credit Card", "Credit", "Other"),
+    ("HSBC India", "HSBC Premier Credit Card", "Credit", "Other"),
+    # Standard Chartered India
+    ("Standard Chartered", "Standard Chartered Ultimate Credit Card", "Credit", "Visa"),
+    ("Standard Chartered", "Standard Chartered Manhattan Credit Card", "Credit", "Other"),
+    ("Standard Chartered", "Standard Chartered EaseMyTrip Credit Card", "Credit", "Other"),
+    # Federal Bank
+    ("Federal Bank", "Federal Bank Scapia Credit Card", "Credit", "Visa"),
+    ("Federal Bank", "Federal Bank Signet Credit Card", "Credit", "Other"),
+    ("Federal Bank", "Federal Bank Celesta Credit Card", "Credit", "Other"),
+    # OneCard / FPL Technologies
+    ("OneCard", "OneCard Credit Card", "Credit", "Visa"),
+]
+
+
 def sid(kind, name):
     return str(uuid.uuid5(NS, f"{kind}:{name.lower()}"))
 
@@ -275,5 +360,17 @@ async def seed_all(db):
             })
         await db.rate_cards.insert_many(docs)
         created["rates"] = len(docs)
+
+    # Card catalogue (identity catalogue — no offers/rates)
+    if await db.card_catalogue.count_documents({}) == 0:
+        docs = []
+        for bank, name, ctype, network in CARD_CATALOGUE:
+            docs.append({
+                "id": sid("card", f"{bank}:{name}"), "bank_name": bank,
+                "card_name": name, "card_type": ctype, "card_network": network,
+                "active": True, "created_at": now_iso(), "updated_at": now_iso(),
+            })
+        await db.card_catalogue.insert_many(docs)
+        created["card_catalogue"] = len(docs)
 
     return created

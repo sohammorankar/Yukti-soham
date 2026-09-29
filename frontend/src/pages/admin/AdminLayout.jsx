@@ -2,7 +2,7 @@ import React from "react";
 import { NavLink, Outlet, useNavigate, Navigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import {
-  LayoutDashboard, Boxes, Store, Tags, Grid3x3, ScrollText, LogOut, Sparkles, Table2,
+  LayoutDashboard, Boxes, Store, Tags, Grid3x3, ScrollText, LogOut, Sparkles, Table2, CreditCard,
 } from "lucide-react";
 
 const ITEMS = [
@@ -12,6 +12,7 @@ const ITEMS = [
   { to: "/admin/platforms", label: "Platforms", icon: Boxes },
   { to: "/admin/stores", label: "Stores & Domains", icon: Store },
   { to: "/admin/categories", label: "Categories & Keywords", icon: Tags },
+  { to: "/admin/cards", label: "Card Catalogue", icon: CreditCard },
   { to: "/admin/audit", label: "Audit Log", icon: ScrollText },
 ];
 

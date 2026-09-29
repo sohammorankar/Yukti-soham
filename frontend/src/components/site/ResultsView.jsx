@@ -98,7 +98,7 @@ export function ResultsView({ result }) {
           {result.inputs?.card && (
             <p className="mt-3 flex flex-wrap items-center gap-1.5 text-xs text-ink-muted" data-testid="result-card-used">
               <CreditCard className="h-3.5 w-3.5 text-gold" />
-              Using {result.inputs.card.bank_name} · {result.inputs.card.card_type} · {result.inputs.card.card_network}
+              Using {result.inputs.card.card_name || result.inputs.card.bank_name} · {result.inputs.card.card_type} · {result.inputs.card.card_network}
               {(result.affiliate?.best?.card_rule_applied || result.gift_card?.best?.card_rule_applied) && (
                 <span className="rounded-full bg-savings/15 px-2 py-0.5 text-[10px] font-600 text-savings" data-testid="card-offer-applied">
                   Eligible card offer applied

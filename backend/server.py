@@ -206,19 +206,25 @@ CARD_NETWORKS = ("Visa", "Mastercard", "RuPay", "American Express", "Other")
 
 
 class CardBody(BaseModel):
-    """Shopper card-profile preferences. ONLY offer-relevant attributes are
-    accepted — card numbers, CVV, expiry, PINs, OTPs and any other credential
-    fields are explicitly forbidden and never stored."""
+    """Shopper card-profile input. Preferred flow: catalog_id referencing the
+    backend-managed card catalogue (attributes are derived server-side so they
+    cannot be spoofed). Legacy manual triple (bank_name/card_type/card_network)
+    is still accepted so existing profiles and flows keep working.
+    ONLY offer-relevant attributes are accepted — card numbers, CVV, expiry,
+    PINs, OTPs and any other credential fields are explicitly forbidden."""
     model_config = {"extra": "forbid"}
 
-    bank_name: str = Field(min_length=1, max_length=80)
-    card_type: Literal["Credit", "Debit"]
-    card_network: Literal["Visa", "Mastercard", "RuPay", "American Express", "Other"]
+    catalog_id: Optional[str] = None
+    bank_name: Optional[str] = Field(default=None, max_length=80)
+    card_type: Optional[Literal["Credit", "Debit"]] = None
+    card_network: Optional[Literal["Visa", "Mastercard", "RuPay", "American Express", "Other"]] = None
 
     @field_validator("bank_name")
     @classmethod
     def clean_bank(cls, v):
-        v = re.sub(r"\s+", " ", (v or "")).strip()
+        if v is None:
+            return None
+        v = re.sub(r"\s+", " ", v).strip()
         if not v:
             raise ValueError("Bank name is required")
         return v
@@ -277,6 +283,7 @@ async def startup():
     await db.login_attempts.create_index("identifier")
     await db.card_profiles.create_index("id", unique=True)
     await db.card_profiles.create_index("user_id")
+    await db.card_catalogue.create_index("id", unique=True)
     for coll in ["platforms", "stores", "categories", "rate_cards"]:
         await db[coll].create_index("id", unique=True)
     await db.store_domains.create_index("domain_or_alias", unique=True)
@@ -419,22 +426,52 @@ async def refresh_token(request: Request, response: Response):
 # profiles are NOT read by /api/calculate and have no effect on savings math.
 # --------------------------------------------------------------------------
 
-CARD_PROJECTION = {"_id": 0, "id": 1, "bank_name": 1, "card_type": 1, "card_network": 1, "created_at": 1}
+CARD_PROJECTION = {"_id": 0, "id": 1, "bank_name": 1, "card_type": 1, "card_network": 1,
+                   "card_name": 1, "card_catalog_id": 1, "created_at": 1}
 
 
 def _norm_bank(v: str) -> str:
     return re.sub(r"\s+", " ", (v or "")).strip().lower()
 
 
-async def _find_duplicate_card(user_id: str, body: CardBody, exclude_id: str = None):
-    """Simple server-side duplicate guard: same bank + type + network for the
-    same owner counts as a duplicate (bank compared case/spacing-insensitively)."""
-    query = {"user_id": user_id, "card_type": body.card_type, "card_network": body.card_network}
+async def _resolve_card_attrs(body: CardBody) -> dict:
+    """Resolve a CardBody to normalized card attributes.
+
+    catalog_id flow: attributes are derived from the backend-managed catalogue
+    (server-side, cannot be spoofed) and the profile retains its catalogue
+    identity via card_catalog_id. Manual flow: the legacy bank/type/network
+    triple (all three required).
+    """
+    if body.catalog_id:
+        cat = await db.card_catalogue.find_one({"id": body.catalog_id, "active": True}, {"_id": 0})
+        if not cat:
+            raise HTTPException(status_code=404, detail="Card not found in catalogue")
+        return {"bank_name": cat["bank_name"], "card_type": cat["card_type"],
+                "card_network": cat["card_network"], "card_name": cat["card_name"],
+                "card_catalog_id": cat["id"]}
+    if not (body.bank_name and body.card_type and body.card_network):
+        raise HTTPException(status_code=422,
+                            detail="Bank name, card type and network are required")
+    return {"bank_name": body.bank_name, "card_type": body.card_type,
+            "card_network": body.card_network, "card_name": None, "card_catalog_id": None}
+
+
+async def _find_duplicate_card(user_id: str, attrs: dict, exclude_id: str = None):
+    """Duplicate guard: same catalogue card, or same normalized bank + type +
+    network triple, for the same owner."""
+    query = {"user_id": user_id}
     if exclude_id:
         query["id"] = {"$ne": exclude_id}
     candidates = await db.card_profiles.find(query, {"_id": 0}).to_list(200)
-    target = _norm_bank(body.bank_name)
-    return next((c for c in candidates if _norm_bank(c.get("bank_name")) == target), None)
+    for c in candidates:
+        if attrs.get("card_catalog_id") and c.get("card_catalog_id") == attrs["card_catalog_id"]:
+            return c
+        if (not attrs.get("card_catalog_id") and not c.get("card_catalog_id")
+                and _norm_bank(c.get("bank_name")) == _norm_bank(attrs["bank_name"])
+                and c.get("card_type") == attrs["card_type"]
+                and c.get("card_network") == attrs["card_network"]):
+            return c
+    return None
 
 
 @api.get("/cards")
@@ -446,21 +483,20 @@ async def list_cards(user: dict = Depends(get_current_user)):
 
 @api.post("/cards", status_code=201)
 async def create_card(body: CardBody, user: dict = Depends(get_current_user)):
-    """Save a card preference profile for the authenticated shopper."""
-    if await _find_duplicate_card(user["id"], body):
+    """Save a card profile for the authenticated shopper (catalogue or manual)."""
+    attrs = await _resolve_card_attrs(body)
+    if await _find_duplicate_card(user["id"], attrs):
         raise HTTPException(status_code=409, detail="This card profile is already saved")
     now = now_iso()
     doc = {
         "id": str(uuid.uuid4()),
         "user_id": user["id"],
-        "bank_name": body.bank_name,
-        "card_type": body.card_type,
-        "card_network": body.card_network,
+        **attrs,
         "created_at": now,
         "updated_at": now,
     }
     await db.card_profiles.insert_one(doc)
-    return {k: doc[k] for k in ("id", "bank_name", "card_type", "card_network", "created_at")}
+    return {k: doc.get(k) for k in ("id", "bank_name", "card_type", "card_network", "card_name", "card_catalog_id", "created_at")}
 
 
 @api.put("/cards/{card_id}")
@@ -469,12 +505,12 @@ async def update_card(card_id: str, body: CardBody, user: dict = Depends(get_cur
     owned = await db.card_profiles.find_one({"id": card_id, "user_id": user["id"]})
     if not owned:
         raise HTTPException(status_code=404, detail="Card not found")
-    if await _find_duplicate_card(user["id"], body, exclude_id=card_id):
+    attrs = await _resolve_card_attrs(body)
+    if await _find_duplicate_card(user["id"], attrs, exclude_id=card_id):
         raise HTTPException(status_code=409, detail="This card profile is already saved")
     await db.card_profiles.update_one(
         {"id": card_id, "user_id": user["id"]},
-        {"$set": {"bank_name": body.bank_name, "card_type": body.card_type,
-                  "card_network": body.card_network, "updated_at": now_iso()}})
+        {"$set": {**attrs, "updated_at": now_iso()}})
     doc = await db.card_profiles.find_one({"id": card_id, "user_id": user["id"]}, CARD_PROJECTION)
     return doc
 
@@ -485,6 +521,100 @@ async def delete_card(card_id: str, user: dict = Depends(get_current_user)):
     res = await db.card_profiles.delete_one({"id": card_id, "user_id": user["id"]})
     if not res.deleted_count:
         raise HTTPException(status_code=404, detail="Card not found")
+    return {"ok": True}
+
+
+# --------------------------------------------------------------------------
+# Card catalogue (public search + admin management). Identity catalogue only:
+# bank_name, card_name, card_type, card_network. NO offers, rates, numbers,
+# CVV, expiry or PINs.
+# --------------------------------------------------------------------------
+
+CATALOGUE_PROJECTION = {"_id": 0, "id": 1, "bank_name": 1, "card_name": 1,
+                        "card_type": 1, "card_network": 1, "active": 1}
+
+
+@api.get("/card-catalogue")
+async def search_card_catalogue(search: str = Query("", alias="q")):
+    """Public, case-insensitive substring search over active catalogue cards
+    (matches card name and bank name)."""
+    query = {"active": True}
+    term = (search or "").strip()
+    if term:
+        rx = re.compile(re.escape(term), re.I)
+        query["$or"] = [{"card_name": rx}, {"bank_name": rx}]
+    return await db.card_catalogue.find(query, CATALOGUE_PROJECTION) \
+        .sort([("bank_name", 1), ("card_name", 1)]).to_list(24)
+
+
+def _validate_catalogue_card(body: dict):
+    forbidden = {"card_number", "cvv", "expiry", "expiry_date", "pin", "otp",
+                 "account_number"} & {k.lower() for k in body}
+    if forbidden:
+        raise HTTPException(400, "Card catalogue must not contain sensitive card data")
+    for f in ("bank_name", "card_name"):
+        if not str(body.get(f) or "").strip():
+            raise HTTPException(400, f"{f} is required")
+        if len(str(body[f]).strip()) > 100:
+            raise HTTPException(400, f"{f} is too long")
+    if body.get("card_type") not in CARD_TYPE_VALUES:
+        raise HTTPException(400, "card_type must be Credit or Debit")
+    if body.get("card_network") not in CARD_NETWORK_VALUES:
+        raise HTTPException(400, f"card_network must be one of {', '.join(CARD_NETWORK_VALUES)}")
+
+
+@api.get("/admin/card-catalogue")
+async def admin_list_catalogue(user=Depends(require_any_role)):
+    return await db.card_catalogue.find({}, CATALOGUE_PROJECTION) \
+        .sort([("bank_name", 1), ("card_name", 1)]).to_list(1000)
+
+
+@api.post("/admin/card-catalogue", status_code=201)
+async def admin_create_catalogue_card(body: dict, request: Request, user=Depends(require_write)):
+    _validate_catalogue_card(body)
+    name_key = f'{body["bank_name"].strip()}:{body["card_name"].strip()}'.lower()
+    if await db.card_catalogue.find_one(
+            {"bank_name": re.compile(f"^{re.escape(body['bank_name'].strip())}$", re.I),
+             "card_name": re.compile(f"^{re.escape(body['card_name'].strip())}$", re.I)}):
+        raise HTTPException(409, "This catalogue card already exists")
+    doc = {
+        "id": sid("card", name_key),
+        "bank_name": re.sub(r"\s+", " ", body["bank_name"]).strip(),
+        "card_name": re.sub(r"\s+", " ", body["card_name"]).strip(),
+        "card_type": body["card_type"], "card_network": body["card_network"],
+        "active": True, "created_at": now_iso(), "updated_at": now_iso(),
+    }
+    await db.card_catalogue.insert_one(doc)
+    await audit(user, "create", "card_catalogue", doc["id"], None, clean(dict(doc)), request)
+    return clean(dict(doc))
+
+
+@api.put("/admin/card-catalogue/{cid}")
+async def admin_update_catalogue_card(cid: str, body: dict, request: Request, user=Depends(require_write)):
+    before = await db.card_catalogue.find_one({"id": cid}, {"_id": 0})
+    if not before:
+        raise HTTPException(404, "Not found")
+    merged = {**before, **{k: v for k, v in body.items()
+                           if k in ("bank_name", "card_name", "card_type", "card_network", "active")}}
+    _validate_catalogue_card(merged)
+    upd = {"bank_name": re.sub(r"\s+", " ", merged["bank_name"]).strip(),
+           "card_name": re.sub(r"\s+", " ", merged["card_name"]).strip(),
+           "card_type": merged["card_type"], "card_network": merged["card_network"],
+           "active": bool(merged.get("active", True)), "updated_at": now_iso()}
+    await db.card_catalogue.update_one({"id": cid}, {"$set": upd})
+    after = await db.card_catalogue.find_one({"id": cid}, {"_id": 0})
+    await audit(user, "update", "card_catalogue", cid, before, after, request)
+    return after
+
+
+@api.post("/admin/card-catalogue/{cid}/activate")
+async def admin_activate_catalogue_card(cid: str, body: dict, request: Request, user=Depends(require_write)):
+    before = await db.card_catalogue.find_one({"id": cid}, {"_id": 0})
+    if not before:
+        raise HTTPException(404, "Not found")
+    active = bool(body.get("active", True))
+    await db.card_catalogue.update_one({"id": cid}, {"$set": {"active": active, "updated_at": now_iso()}})
+    await audit(user, "activate" if active else "deactivate", "card_catalogue", cid, None, {"active": active}, request)
     return {"ok": True}
 
 
@@ -559,7 +689,7 @@ async def calculate(body: CalcBody, request: Request):
             raise HTTPException(status_code=401, detail="Log in to use a saved card")
         owned = await db.card_profiles.find_one(
             {"id": body.card_id, "user_id": caller["id"]},
-            {"_id": 0, "bank_name": 1, "card_type": 1, "card_network": 1})
+            {"_id": 0, "bank_name": 1, "card_type": 1, "card_network": 1, "card_name": 1})
         if not owned:
             raise HTTPException(status_code=404, detail="Card not found")
         card = owned
