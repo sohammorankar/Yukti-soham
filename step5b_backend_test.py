@@ -20,7 +20,7 @@ import sys
 from decimal import Decimal
 
 # Backend URL from environment
-BACKEND_URL = "https://repo-verify-yukti.preview.emergentagent.com/api"
+BACKEND_URL = "https://yukti-mvp.preview.emergentagent.com/api"
 
 # Test credentials
 OWNER_EMAIL = "owner@yukticart.com"
