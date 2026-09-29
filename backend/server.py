@@ -1040,13 +1040,14 @@ async def restore_platform(pid: str, request: Request, user=Depends(require_writ
     return {"restored": True}
 
 
-# ---- Affiliate Destinations (Store × Affiliate Partner deep-link mapping) ----
+# ---- Partner Destinations (Store × Partner deep-link mapping: affiliate + gift_card) ----
 async def _enrich_destination(d, stores_by_id, plats_by_id):
     d = dict(d)
     st = stores_by_id.get(d.get("store_id")) or {}
     pl = plats_by_id.get(d.get("platform_id")) or {}
     d["store_name"] = st.get("name")
     d["partner_name"] = pl.get("name")
+    d["partner_kind"] = pl.get("kind")
     return d
 
 
@@ -1074,13 +1075,13 @@ async def create_affiliate_destination(body: dict, request: Request, user=Depend
         raise HTTPException(404, "Store not found")
     plat = await db.platforms.find_one({"id": platform_id}, {"_id": 0})
     if not plat:
-        raise HTTPException(404, "Affiliate partner not found")
-    if plat.get("kind") != "affiliate":
-        raise HTTPException(400, "Selected partner is not an affiliate partner")
+        raise HTTPException(404, "Partner not found")
+    if plat.get("kind") not in ("affiliate", "gift_card"):
+        raise HTTPException(400, "Selected partner must be an affiliate or gift-card partner")
     if not _is_safe_http_url(dest):
         raise HTTPException(400, "destination_url must be a valid http(s) URL (unsafe schemes are rejected)")
     if await db.affiliate_destinations.find_one({"store_id": store_id, "platform_id": platform_id}):
-        raise HTTPException(409, "A mapping for this Store × Affiliate Partner already exists")
+        raise HTTPException(409, "A mapping for this Store × Partner already exists")
     doc = {"id": str(uuid.uuid4()), "store_id": store_id, "platform_id": platform_id,
            "destination_url": dest, "active": bool(body.get("active", True)),
            "created_at": now_iso(), "updated_at": now_iso()}

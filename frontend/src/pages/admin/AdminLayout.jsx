@@ -12,7 +12,7 @@ const ITEMS = [
   { to: "/admin/platforms", label: "Platforms", icon: Boxes },
   { to: "/admin/stores", label: "Stores & Domains", icon: Store },
   { to: "/admin/categories", label: "Categories & Keywords", icon: Tags },
-  { to: "/admin/affiliate-destinations", label: "Affiliate Destinations", icon: Link2 },
+  { to: "/admin/affiliate-destinations", label: "Partner Destinations", icon: Link2 },
   { to: "/admin/cards", label: "Card Catalogue", icon: CreditCard },
   { to: "/admin/audit", label: "Audit Log", icon: ScrollText },
 ];

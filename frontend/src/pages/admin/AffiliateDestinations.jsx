@@ -10,7 +10,7 @@ import { useMeta } from "@/lib/useMeta";
 const empty = { store_id: "", platform_id: "", destination_url: "", active: true };
 
 export default function AffiliateDestinations() {
-  useMeta("Affiliate Destinations · Console", "");
+  useMeta("Partner Destinations · Console", "");
   const [rows, setRows] = useState([]);
   const [stores, setStores] = useState([]);
   const [partners, setPartners] = useState([]);
@@ -24,10 +24,14 @@ export default function AffiliateDestinations() {
     load();
     api.get("/admin/stores").then(({ data }) => setStores(data.filter((s) => !s.archived_at)));
     api.get("/admin/platforms").then(({ data }) =>
-      setPartners(data.filter((p) => p.kind === "affiliate" && !p.archived_at)));
+      setPartners(data.filter((p) => ["affiliate", "gift_card"].includes(p.kind) && !p.archived_at)));
   }, []);
 
-  const affiliatePartners = useMemo(() => partners, [partners]);
+  const kindLabel = (k) => (k === "gift_card" ? "Gift Card" : k === "affiliate" ? "Affiliate" : k || "—");
+  // Sort partners by type then name so both affiliate and gift-card options are easy to find.
+  const sortedPartners = useMemo(
+    () => [...partners].sort((a, b) => (a.kind || "").localeCompare(b.kind || "") || (a.name || "").localeCompare(b.name || "")),
+    [partners]);
 
   const save = async () => {
     if (!editId && (!form.store_id || !form.platform_id)) { toast.error("Choose store and affiliate partner"); return; }
@@ -67,10 +71,10 @@ export default function AffiliateDestinations() {
       <div className="mb-5 flex items-center justify-between gap-3">
         <div>
           <h1 className="flex items-center gap-2 font-display text-3xl font-600 text-ink">
-            <Link2 className="h-6 w-6 text-gold" /> Affiliate Destinations
+            <Link2 className="h-6 w-6 text-gold" /> Partner Destinations
           </h1>
           <p className="text-sm text-ink-muted">
-            Trusted deep-link destinations for a specific Store × Affiliate Partner combination.
+            Trusted deep-link destinations for a specific Store × Partner combination (affiliate or gift-card).
             When active, the YuktiMagic bridge routes to this URL; otherwise it falls back to the partner's generic link.
           </p>
         </div>
@@ -91,12 +95,14 @@ export default function AffiliateDestinations() {
                   {stores.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
                 </select>
               </Field>
-              <Field label="Affiliate Partner">
+              <Field label="Partner">
                 <select value={form.platform_id} disabled={!!editId}
                   onChange={(e) => setForm({ ...form, platform_id: e.target.value })}
                   data-testid="dest-partner" className="in disabled:opacity-60">
                   <option value="">Select partner…</option>
-                  {affiliatePartners.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  {sortedPartners.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name} — {kindLabel(p.kind)}</option>
+                  ))}
                 </select>
               </Field>
               <Field label="Destination URL (https)">
@@ -125,20 +131,24 @@ export default function AffiliateDestinations() {
         <table className="w-full text-sm">
           <thead className="bg-surface-2 text-left text-xs uppercase text-ink-muted">
             <tr>
-              <th className="p-3">Store</th><th className="p-3">Affiliate Partner</th>
+              <th className="p-3">Store</th><th className="p-3">Partner Type</th><th className="p-3">Partner</th>
               <th className="p-3">Destination</th><th className="p-3">Status</th>
               <th className="p-3 text-right">Actions</th>
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 && (
-              <tr><td colSpan={5} className="p-6 text-center text-ink-muted">No mappings yet. Add one to override a Store × Partner link.</td></tr>
+              <tr><td colSpan={6} className="p-6 text-center text-ink-muted">No mappings yet. Add one to override a Store × Partner link.</td></tr>
             )}
             {rows.map((r) => (
               <tr key={r.id} className="border-t border-border" data-testid={`dest-row-${r.id}`}>
                 <td className="p-3 text-ink">{r.store_name || r.store_id}</td>
+                <td className="p-3">
+                  <span className={`rounded-full border px-2 py-0.5 text-xs ${r.partner_kind === "gift_card" ? "border-gold/40 text-gold" : "border-border text-ink-muted"}`}
+                    data-testid={`dest-kind-${r.id}`}>{kindLabel(r.partner_kind)}</span>
+                </td>
                 <td className="p-3 text-ink-muted">{r.partner_name || r.platform_id}</td>
-                <td className="max-w-[280px] truncate p-3 text-ink-muted" title={r.destination_url}>{r.destination_url}</td>
+                <td className="max-w-[240px] truncate p-3 text-ink-muted" title={r.destination_url}>{r.destination_url}</td>
                 <td className="p-3">
                   {r.active
                     ? <span className="text-savings" data-testid={`dest-status-${r.id}`}>Active</span>
