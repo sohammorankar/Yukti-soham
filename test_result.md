@@ -104,6 +104,36 @@
 
 user_problem_statement: "STEP 2 — Automatic URL store & category detection in the shopper Savings Engine. Auto-trigger /api/detect on a valid URL (debounce + on blur), auto-fill Store & Category, remove the Detect button, show a loading state, keep manual correction, handle invalid URLs gracefully. Backend /api/detect reused unchanged."
 
+backend:
+  - task: "STEP 5C — Profile update endpoint PUT /api/auth/me"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        -working: "NA"
+        -agent: "main"
+        -comment: "NEW PUT /api/auth/me (auth required) for self-service shopper profile update. Updates ONLY full_name (mirrored to name), gender (male|female|other|prefer_not), mobile (10-digit Indian, +91 tolerated), avatar_url (http(s) or data:image/ only). Pydantic ProfileUpdateBody uses extra='forbid'. Returns refreshed user without password_hash, with roles[]. Does NOT touch roles/cards/rates/calculation. Reuses existing users collection & auth architecture — no schema migration. Needs testing: validation (422 for bad avatar/mobile/gender/unknown field), 401 when unauthenticated, no privilege escalation, and regression that /api/calculate Firstcry stays 88/1251."
+        -working: true
+  - task: "STEP 5C — Simplified public navbar + shopper Profile page"
+    implemented: true
+    working: true
+    file: "frontend/src/components/site/Nav.jsx, frontend/src/pages/Profile.jsx, frontend/src/context/AuthContext.jsx, frontend/src/App.js, frontend/src/pages/Home.jsx, frontend/src/components/site/SavingsEngine.jsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        -working: true
+        -agent: "main"
+        -comment: "Simplified public navbar to: YuktiCart logo, long product/URL search area (routes to homepage engine via ?u=), theme toggle, Support (→/contact), guest Login/Signup, authed Profile name+avatar + My Cards + Logout. Removed marketing links (Deals/Brands/Categories/How It Works/About/Contact), Aabhar button (still on Home hero) and public Rate Console link. NEW /account/profile page (Profile.jsx) reuses AuthContext: view/complete full_name, gender, mobile, read-only email, avatar (upload→data URL or clears), completeness meter, My Cards link, explicit no-financial-data note. AuthContext gains updateProfile() → PUT /api/auth/me and syncs context. Home reads ?u= and prefills SavingsEngine URL (auto-detect only; no calc change). Self-verified via screenshots: desktop 1920x800 & mobile 390x844 no overflow, nav-rate-console absent, navbar search auto-detected Firstcry, owner login shows nav-profile+profile page. Admin console (/admin/*) and its sidebar untouched. Frontend automated testing NOT yet run (awaiting user)."
+
+
+        -agent: "testing"
+        -comment: "✅ COMPREHENSIVE BACKEND TESTING COMPLETED - ALL 12 TESTS PASSED. Created comprehensive test suite (/app/step5c_test.py) covering all review request scenarios. (1) REGISTER FRESH SHOPPER ✓: POST /api/auth/register with unique email qa+<rand>@example.com, mobile 9123456780, password 'Shop1234', full_name 'QA User', gender female → 200, access_token captured. (2) GET /api/auth/me ✓: 200, response has email/full_name/roles[], NO password_hash (secure). (3) FULL PROFILE UPDATE ✓: PUT /api/auth/me {full_name:'QA Updated', gender:'male', mobile:'9876543210'} → 200, response reflects all updates, name==full_name=='QA Updated', roles unchanged (empty []), NO password_hash. (4) VALID AVATAR URL ✓: PUT /api/auth/me {avatar_url:'https://example.com/a.png'} → 200, avatar_url saved correctly. (5) INVALID AVATAR URL ✓: PUT /api/auth/me {avatar_url:'notaurl'} → 422 with error 'Avatar must be a valid image URL'. (6) INVALID MOBILE ✓: PUT /api/auth/me {mobile:'12345'} → 422 with error 'Enter a valid 10-digit Indian mobile number'. (7) INVALID GENDER ✓: PUT /api/auth/me {gender:'xyz'} → 422 with error 'Invalid gender selection'. (8) EXTRA FIELD FORBIDDEN + NO PRIVILEGE ESCALATION ✓: PUT /api/auth/me {is_admin:true} → 422 with error 'Extra inputs are not permitted' (extra='forbid' working), then GET /api/auth/me confirmed roles still [] (no privilege escalation, secure). (9) UNAUTHENTICATED UPDATE ✓: PUT /api/auth/me without token → 401. (10) PARTIAL UPDATE ✓: PUT /api/auth/me {gender:'other'} → 200, gender updated to 'other', full_name and mobile intact (unchanged). (11) REGRESSION: FIRSTCRY CALCULATION ✓: POST /api/calculate {store_name:'Firstcry',category:'All',customer_type:'existing',mrp:1599,price:1338} → 200, extra_saved.rupees=88, final_bill.rupees=1251 (EXACT match, unchanged). (12) REGRESSION: PUBLIC ENDPOINTS ✓: GET /api/card-catalogue?q=SBI → 6 cards found, GET /api/public/stores → 13 stores, GET /api/public/categories → 15 categories (all working). ADDITIONAL VALIDATION ✓: Tested data:image/ avatar URL (data:image/png;base64,...) → 200 accepted and saved correctly. Tested +91 mobile prefix (+919876543210) → 200, prefix stripped, saved as 10 digits '9876543210'. All validation working correctly (avatar_url must be http(s) or data:image/, mobile 10-digit Indian with +91 tolerated, gender male|female|other|prefer_not, extra fields rejected). Security verified (NO password_hash in responses, NO privilege escalation, unauthenticated requests rejected). Backward compatibility maintained (Firstcry calculation unchanged, public endpoints working). Feature is production-ready."
+
+
 frontend:
   - task: "Automatic URL store & category detection (no Detect button)"
     implemented: true
@@ -152,18 +182,22 @@ frontend:
 
 metadata:
   created_by: "main_agent"
-  version: "1.8"
-  test_sequence: 8
+  version: "1.9"
+  test_sequence: 9
   run_ui: false
 
 test_plan:
-  current_focus:
-    - "STEP 5B — Searchable Indian card catalogue + My Cards (COMPLETE - all tests passed)"
+  current_focus: []
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
 
 agent_communication:
+    -agent: "main"
+    -message: "STEP 5C BACKEND — Test ONLY the NEW profile-update endpoint and confirm NO regression to existing auth/calculation. NEW: PUT /api/auth/me (auth required) updates ONLY full_name (also mirrors to name), gender (male|female|other|prefer_not), mobile (10-digit Indian, +91 tolerated), avatar_url (must be http(s) or data:image/ ; other strings 422). Body uses extra='forbid' so unexpected keys → 422. Response is the refreshed user WITHOUT password_hash and WITH roles[]. It must NOT touch roles, cards, rates, or calculation. TEST STEPS: (1) Register/login a fresh shopper (POST /api/auth/register: unique email like qa+<rand>@example.com, mobile 9123456780, password 'Shop1234', full_name 'QA User', gender female). (2) GET /api/auth/me → 200, has email/full_name/roles, NO password_hash. (3) PUT /api/auth/me {full_name:'QA Updated', gender:'male', mobile:'9876543210'} → 200; verify response reflects updates, name==full_name=='QA Updated', roles unchanged (empty), NO password_hash. (4) PUT /api/auth/me {avatar_url:'https://example.com/a.png'} → 200 avatar_url saved. (5) Invalid avatar_url 'notaurl' → 422. (6) Invalid mobile '12345' → 422. (7) Invalid gender 'xyz' → 422. (8) Unknown field {is_admin:true} → 422 (extra forbidden) AND confirm roles still empty (no privilege escalation). (9) Unauthenticated PUT /api/auth/me → 401. (10) Partial update {gender:'other'} keeps other fields intact. (11) REGRESSION: same shopper Firstcry calc via POST /api/calculate {store_name:'Firstcry',category:'All',customer_type:'existing',mrp:1599,price:1338} → extra_saved.rupees=88, final_bill.rupees=1251 (UNCHANGED). (12) REGRESSION: GET /api/card-catalogue?q=SBI returns SBI cards; GET /api/public/stores and /api/public/categories return lists. Owner creds owner@yukticart.com / YuktiOwner!2025 in /app/memory/test_credentials.md. Do NOT test frontend (will ask user separately)."
+    -agent: "testing"
+    -message: "STEP 5C BACKEND TESTING COMPLETE ✅ ALL 12 TESTS PASSED. Profile update endpoint PUT /api/auth/me is fully functional, secure, and production-ready. Comprehensive test suite (/app/step5c_test.py) verified all requirements: (1) Fresh shopper registration working, (2) GET /api/auth/me returns correct structure (email/full_name/roles[], NO password_hash), (3) Full profile update working (full_name mirrored to name, gender/mobile updated, roles unchanged), (4) Valid avatar_url (https) saved correctly, (5) Invalid avatar_url rejected with 422, (6) Invalid mobile rejected with 422, (7) Invalid gender rejected with 422, (8) Extra fields forbidden (422) + no privilege escalation verified (roles still empty), (9) Unauthenticated requests rejected (401), (10) Partial updates working (other fields intact). ADDITIONAL VALIDATION: data:image/ avatar URLs accepted and saved correctly, +91 mobile prefix tolerated and stripped to 10 digits. SECURITY VERIFIED: NO password_hash in any response, NO privilege escalation possible (extra='forbid' working), unauthenticated requests rejected. REGRESSION TESTS PASSED: (11) Firstcry calculation unchanged (extra_saved=88, final_bill=1251), (12) Public endpoints working (card-catalogue returns 6 SBI cards, public/stores returns 13 stores, public/categories returns 15 categories). All validation rules working correctly (avatar_url must be http(s) or data:image/, mobile 10-digit Indian with +91 tolerated, gender male|female|other|prefer_not, extra fields rejected). Feature is production-ready. Main agent can summarize and finish STEP 5C."
+
     -agent: "main"
     -message: "STEP 4A — Test ONLY shopper signup/login/guest (no admin regression beyond the protection check). Backend: NEW POST /api/auth/register creates a ROLELESS shopper and auto-logs in (curl-verified: roleless, no hash leak, dup email 409, invalid email 422, invalid mobile/weak password 422, login ok, wrong pass 401). Admin READ endpoints now require a non-empty role (curl-verified: shopper GET /admin/platforms=403, owner=200, anon=401). Shopper still gets /auth/me=200 and can calculate. Frontend: NEW /login (testids login-email-input, login-password-input, login-submit-button, login-register-link, continue-as-guest) and /signup (testids register-name-input, register-gender + register-gender-<val>, register-mobile-input, register-email-input, register-password-input, register-submit-button, register-login-link, continue-as-guest; inline errors register-*-error). Nav shows nav-login when anon, and nav-user + nav-logout when signed in (mobile: nav-login-mobile/nav-signup-mobile/nav-logout-mobile). TEST STEPS: (1) Valid signup at /signup: Full Name 'Test Shopper', gender Female radio, mobile 9123456780, unique email like qa+<rand>@example.com, password 'Shop1234' → submit → lands on homepage, Nav shows 'Hi, Test' + logout. (2) Missing mandatory field: clear mobile → submit → inline required error, no navigation. (3) Invalid email 'abc' → inline email error. (4) Invalid mobile '12345' → inline mobile error. (5) Weak password 'short' → inline password error. (6) Duplicate email: sign up again with asha@example.com → server error 'account with this email already exists' shown. (7) Login at /login with asha@example.com / Shop1234 → success, Nav shows logged-in state. (8) Incorrect password → error message, stays on login. (9) Guest access: from /login or /signup click 'Continue as Guest' → goes to homepage and Savings Engine usable. (10) Guest can calculate: on homepage (not logged in), paste Firstcry URL https://www.firstcry.com/product/123, MRP 1599 price 1338 Existing → Calculate → results with extra ₹88 / final ₹1,251. (11) Logged-in shopper can calculate: log in then run the same Firstcry calc → results render. (12) Normal shopper cannot access admin: while logged in as shopper, visit /admin → should redirect to /admin/login (not the dashboard) because shopper has no roles. (13) No password/hash leakage: check that no network response or UI exposes password_hash. (14) Mobile layout 390x844 for /signup and /login (no overflow). (15) Desktop layout 1920x1080. (16) No JS console errors. Shopper creds available in /app/memory/test_credentials.md (asha@example.com / Shop1234). Do NOT change savings engine/detection/partner/bridge."
     -agent: "testing"

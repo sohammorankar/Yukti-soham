@@ -201,6 +201,57 @@ class RegisterBody(BaseModel):
         return v
 
 
+class ProfileUpdateBody(BaseModel):
+    """Shopper self-service profile update. Reuses the existing users collection
+    and auth architecture. Only non-sensitive profile fields are accepted — no
+    card, financial or credential data is ever handled here."""
+    model_config = {"extra": "forbid"}
+
+    full_name: Optional[str] = Field(default=None, max_length=80)
+    gender: Optional[str] = None
+    mobile: Optional[str] = None
+    avatar_url: Optional[str] = Field(default=None, max_length=1_000_000)
+
+    @field_validator("full_name")
+    @classmethod
+    def clean_full_name(cls, v):
+        if v is None:
+            return None
+        v = re.sub(r"\s+", " ", v).strip()
+        return v or None
+
+    @field_validator("gender")
+    @classmethod
+    def valid_gender(cls, v):
+        if v in (None, ""):
+            return None
+        if v not in ("male", "female", "other", "prefer_not"):
+            raise ValueError("Invalid gender selection")
+        return v
+
+    @field_validator("mobile")
+    @classmethod
+    def indian_mobile(cls, v):
+        if v in (None, ""):
+            return None
+        digits = re.sub(r"\D", "", v or "")
+        if len(digits) == 12 and digits.startswith("91"):
+            digits = digits[2:]
+        if not re.fullmatch(r"[6-9]\d{9}", digits):
+            raise ValueError("Enter a valid 10-digit Indian mobile number")
+        return digits
+
+    @field_validator("avatar_url")
+    @classmethod
+    def clean_avatar(cls, v):
+        if v in (None, ""):
+            return None
+        v = v.strip()
+        if not re.match(r"^https?://", v, re.I) and not v.startswith("data:image/"):
+            raise ValueError("Avatar must be a valid image URL")
+        return v
+
+
 CARD_TYPES = ("Credit", "Debit")
 CARD_NETWORKS = ("Visa", "Mastercard", "RuPay", "American Express", "Other")
 
@@ -395,6 +446,29 @@ async def logout(response: Response, user: dict = Depends(get_current_user)):
 @api.get("/auth/me")
 async def me(user: dict = Depends(get_current_user)):
     return user
+
+
+@api.put("/auth/me")
+async def update_me(body: ProfileUpdateBody, user: dict = Depends(get_current_user)):
+    """Self-service profile update (full name, gender, mobile, avatar). Reuses the
+    existing users collection; never touches roles, cards, rates or any financial
+    data. Returns the refreshed user profile (password hash always excluded)."""
+    updates = {}
+    if body.full_name is not None:
+        updates["full_name"] = body.full_name
+        updates["name"] = body.full_name
+    if body.gender is not None:
+        updates["gender"] = body.gender
+    if body.mobile is not None:
+        updates["mobile"] = body.mobile
+    if body.avatar_url is not None:
+        updates["avatar_url"] = body.avatar_url
+    if updates:
+        updates["updated_at"] = now_iso()
+        await db.users.update_one({"id": user["id"]}, {"$set": updates})
+    fresh = await db.users.find_one({"id": user["id"]}, {"_id": 0, "password_hash": 0})
+    fresh["roles"] = await roles_for(user["id"])
+    return fresh
 
 
 @api.post("/auth/refresh")

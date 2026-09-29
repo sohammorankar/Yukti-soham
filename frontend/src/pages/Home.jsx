@@ -1,5 +1,5 @@
 import React, { useContext, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Sparkles, Store, Tags, ShieldCheck, Users, ArrowRight, Flame, Zap } from "lucide-react";
 import { SavingsEngine } from "@/components/site/SavingsEngine";
@@ -14,6 +14,17 @@ export default function Home() {
   const [stores, setStores] = useState([]);
   const [categories, setCategories] = useState([]);
   const openMandir = useContext(MandirContext);
+  const [searchParams] = useSearchParams();
+
+  // A product link pasted in the navbar search arrives as ?u=... — prefill the
+  // Savings Engine with it (this triggers the existing auto-detect flow only).
+  useEffect(() => {
+    const u = searchParams.get("u");
+    if (u) {
+      setInitial({ url: u });
+      setTimeout(() => document.getElementById("engine")?.scrollIntoView({ behavior: "smooth" }), 120);
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     document.title = "YuktiCart — Stack cashback, gift cards & discounts for the lowest bill";

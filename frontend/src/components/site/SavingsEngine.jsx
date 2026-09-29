@@ -61,6 +61,7 @@ export function SavingsEngine({ onResult, initial }) {
       setStoreId(initial.store_id || ""); setCategory(initial.category || "All");
       setCustomerType(initial.customer_type || "existing");
       setMrp(String(initial.mrp || "")); setPrice(String(initial.price || ""));
+      if (initial.url) setUrl(initial.url);
     }
   }, [initial]);
 

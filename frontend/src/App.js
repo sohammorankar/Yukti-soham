@@ -14,6 +14,7 @@ import Bridge from "@/pages/Bridge";
 import Login from "@/pages/auth/Login";
 import Signup from "@/pages/auth/Signup";
 import MyCards from "@/pages/MyCards";
+import Profile from "@/pages/Profile";
 
 import AdminLogin from "@/pages/admin/AdminLogin";
 import AdminLayout from "@/pages/admin/AdminLayout";
@@ -50,6 +51,7 @@ export default function App() {
               <Route path="/report-rate" element={<FeedbackPage kind="report_rate" />} />
               <Route path="/suggest" element={<FeedbackPage kind="suggest_store" />} />
               <Route path="/account/cards" element={<MyCards />} />
+              <Route path="/account/profile" element={<Profile />} />
             </Route>
 
             <Route path="/go/:partner" element={<Bridge />} />

@@ -49,11 +49,24 @@ export function AuthProvider({ children }) {
     setUser(false);
   };
 
+  // Update the profile fields (full name, gender, mobile, avatar) for the
+  // authenticated shopper and sync the result into context so the navbar and
+  // profile page reflect changes immediately.
+  const updateProfile = async (payload) => {
+    try {
+      const { data } = await api.put("/auth/me", payload);
+      setUser(data);
+      return { ok: true, user: data };
+    } catch (e) {
+      return { ok: false, error: formatApiErrorDetail(e.response?.data?.detail) || e.message };
+    }
+  };
+
   const isAdmin = !!(user && user.roles && user.roles.length);
   const isAuthed = !!(user && user.email);
 
   return (
-    <AuthContext.Provider value={{ user, ready, login, register, logout, isAdmin, isAuthed }}>
+    <AuthContext.Provider value={{ user, ready, login, register, logout, updateProfile, isAdmin, isAuthed }}>
       {children}
     </AuthContext.Provider>
   );
