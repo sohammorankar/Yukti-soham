@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Link2, Store, Tags, Calculator, Info, BadgeCheck, HelpCircle, Frown, Smile, Loader2 } from "lucide-react";
+import { Link } from "react-router-dom";
+import { Link2, Store, Tags, Calculator, Info, BadgeCheck, HelpCircle, Frown, Smile, Loader2, CreditCard } from "lucide-react";
 import { Combobox } from "@/components/Combobox";
 import {
   Tooltip, TooltipContent, TooltipProvider, TooltipTrigger,
@@ -7,6 +8,7 @@ import {
 import { api } from "@/lib/api";
 import { money } from "@/lib/format";
 import { toast } from "sonner";
+import { useAuth } from "@/context/AuthContext";
 
 // Lightweight check so we only call /api/detect when the URL is "complete enough".
 // Requires a domain-like token (something.tld) — avoids firing on partial typing.
@@ -17,8 +19,11 @@ function looksLikeUrl(val) {
 }
 
 export function SavingsEngine({ onResult, initial }) {
+  const { isAuthed } = useAuth();
   const [stores, setStores] = useState([]);
   const [categories, setCategories] = useState([]);
+  const [myCards, setMyCards] = useState([]);
+  const [cardId, setCardId] = useState(""); // "" = no card selected (optional)
   const [url, setUrl] = useState("");
   const [storeId, setStoreId] = useState("");
   const [category, setCategory] = useState("All");
@@ -43,6 +48,13 @@ export function SavingsEngine({ onResult, initial }) {
       } catch { toast.error("Could not load stores/categories"); }
     })();
   }, []);
+
+  // Logged-in shoppers may optionally calculate with one of their saved cards.
+  // Guests never see this and calculate exactly as before.
+  useEffect(() => {
+    if (!isAuthed) { setMyCards([]); setCardId(""); return; }
+    api.get("/cards").then(({ data }) => setMyCards(data)).catch(() => {});
+  }, [isAuthed]);
 
   useEffect(() => {
     if (initial) {
@@ -129,6 +141,7 @@ export function SavingsEngine({ onResult, initial }) {
       const { data } = await api.post("/calculate", {
         store_id: storeId, store_name: selectedStore?.name, category,
         customer_type: customerType, mrp: Number(mrp), price: Number(price),
+        ...(cardId ? { card_id: cardId } : {}),
       });
       setLastResult(data);
       onResult(data);
@@ -203,6 +216,40 @@ export function SavingsEngine({ onResult, initial }) {
             )}
           </div>
         </div>
+
+        {/* Optional payment card — logged-in shoppers only; never required */}
+        {isAuthed && (
+          <div className="mt-4">
+            <label className="mb-1.5 flex items-center gap-1.5 text-xs font-600 uppercase tracking-wide text-ink-muted">
+              <CreditCard className="h-3.5 w-3.5" /> Payment Card
+              <span className="font-400 normal-case tracking-normal">(optional)</span>
+            </label>
+            {myCards.length > 0 ? (
+              <select
+                value={cardId}
+                onChange={(e) => setCardId(e.target.value)}
+                data-testid="select-card"
+                aria-label="Select payment card (optional)"
+                className="focus-ring h-11 w-full rounded-md border border-border bg-input px-3 text-sm text-foreground"
+              >
+                <option value="">No card selected</option>
+                {myCards.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.bank_name} • {c.card_type} • {c.card_network}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <p className="rounded-md border border-dashed border-border px-3 py-2.5 text-xs text-ink-muted" data-testid="no-saved-card">
+                No saved card —{" "}
+                <Link to="/account/cards" className="text-gold hover:underline" data-testid="add-card-link">
+                  add one in My Cards
+                </Link>{" "}
+                to check card-specific eligibility.
+              </p>
+            )}
+          </div>
+        )}
 
         {/* Amazon / Flipkart notice */}
         {isAmazonFlipkart && (

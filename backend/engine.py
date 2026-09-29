@@ -13,6 +13,51 @@ from money import D, q, round_rupee, money_out, ZERO
 # Rate eligibility + application
 # --------------------------------------------------------------------------
 
+CARD_ELIGIBILITY_MODES = ("no_card_requirement", "any_card", "specific_card", "bank", "network")
+
+
+def _norm_text(v):
+    return re.sub(r"\s+", " ", str(v or "")).strip().lower()
+
+
+def card_rule_eligible(rate, card):
+    """Evaluate a rate's optional card-eligibility condition.
+
+    rate fields: card_eligibility (mode), card_criteria (dict, mode-dependent).
+    card: None or {bank_name, card_type, card_network} (shopper's saved profile).
+    Returns (eligible: bool, reason: str|None).
+
+    Backward compatible: rates without card_eligibility behave exactly as before.
+    """
+    mode = rate.get("card_eligibility") or "no_card_requirement"
+    if mode == "no_card_requirement":
+        return True, None
+    if not card:
+        return False, "Requires an eligible payment card"
+    crit = rate.get("card_criteria") or {}
+    if mode == "any_card":
+        return True, None
+    if mode == "bank":
+        ok = _norm_text(card.get("bank_name")) == _norm_text(crit.get("bank_name"))
+        return ok, None if ok else f"Requires a {crit.get('bank_name')} card"
+    if mode == "network":
+        ok = (card.get("card_network") or "") == (crit.get("card_network") or "")
+        return ok, None if ok else f"Requires a {crit.get('card_network')} card"
+    if mode == "specific_card":
+        # Every configured attribute must match the selected card profile.
+        checks = []
+        if crit.get("bank_name"):
+            checks.append(_norm_text(card.get("bank_name")) == _norm_text(crit.get("bank_name")))
+        if crit.get("card_type"):
+            checks.append((card.get("card_type") or "") == crit.get("card_type"))
+        if crit.get("card_network"):
+            checks.append((card.get("card_network") or "") == crit.get("card_network"))
+        ok = bool(checks) and all(checks)
+        label = crit.get("label") or crit.get("bank_name") or "the configured card"
+        return ok, None if ok else f"Requires {label}"
+    return False, "Unknown card eligibility rule"
+
+
 def _parse_date(value):
     if value in (None, ""):
         return None
@@ -29,7 +74,7 @@ def _parse_date(value):
             return None
 
 
-def rate_is_eligible(rate, price, customer_type, today=None):
+def rate_is_eligible(rate, price, customer_type, today=None, card=None):
     """Return (eligible: bool, reasons: list[str])."""
     reasons = []
     today = today or datetime.now(timezone.utc).date()
@@ -52,6 +97,11 @@ def rate_is_eligible(rate, price, customer_type, today=None):
     rct = (rate.get("customer_type") or "both").lower()
     if rct not in ("both", (customer_type or "existing").lower()):
         reasons.append("Customer type does not match")
+
+    # Optional card eligibility — only restricts rates that declare a card rule.
+    card_ok, card_reason = card_rule_eligible(rate, card)
+    if not card_ok:
+        reasons.append(card_reason)
 
     return (len(reasons) == 0, reasons)
 
@@ -90,7 +140,7 @@ def _rate_sort_key(entry):
     )
 
 
-def best_rule_for_side(rules, price, product_category, customer_type, today=None):
+def best_rule_for_side(rules, price, product_category, customer_type, today=None, card=None):
     """From a list of rate dicts of one kind, return the best eligible entry.
 
     Returns dict with rate, saving (Decimal), applied_to (Decimal), eligible, reasons
@@ -100,7 +150,7 @@ def best_rule_for_side(rules, price, product_category, customer_type, today=None
     for rate in rules:
         if not category_matches(rate.get("category_name"), product_category):
             continue
-        eligible, reasons = rate_is_eligible(rate, price, customer_type, today)
+        eligible, reasons = rate_is_eligible(rate, price, customer_type, today, card)
         saving, applied_to = (apply_rate(rate, price) if eligible else (ZERO, ZERO))
         evaluated.append({
             "rate": rate,
@@ -116,16 +166,22 @@ def best_rule_for_side(rules, price, product_category, customer_type, today=None
 
 
 def calculate_stack(store, product_category, customer_type, mrp, price,
-                    affiliate_rules, giftcard_rules, today=None, rate_version="v1"):
-    """Full stacking calculation. Returns a JSON-serializable dict."""
+                    affiliate_rules, giftcard_rules, today=None, rate_version="v1",
+                    card=None):
+    """Full stacking calculation. Returns a JSON-serializable dict.
+
+    card: optional shopper card profile {bank_name, card_type, card_network}.
+    Only rates that declare a card_eligibility rule are affected by it; all
+    other rates (and the no-card case) behave exactly as before.
+    """
     price = D(price)
     mrp = D(mrp)
     customer_type = (customer_type or "existing").lower()
 
     aff_winner, aff_eval = best_rule_for_side(
-        affiliate_rules, price, product_category, customer_type, today)
+        affiliate_rules, price, product_category, customer_type, today, card)
     gc_winner, gc_eval = best_rule_for_side(
-        giftcard_rules, price, product_category, customer_type, today)
+        giftcard_rules, price, product_category, customer_type, today, card)
 
     cashback_saving = aff_winner["saving"] if aff_winner else ZERO
     giftcard_saving = gc_winner["saving"] if gc_winner else ZERO
@@ -214,6 +270,10 @@ def calculate_stack(store, product_category, customer_type, mrp, price,
                                             if r.get("maximum_eligible_amount") not in (None, "") else None),
                 "category_name": r.get("category_name"),
                 "customer_type": r.get("customer_type"),
+                "card_eligibility": r.get("card_eligibility") or "no_card_requirement",
+                "card_rule_applied": bool(
+                    winner and winner["rate"].get("id") == r.get("id")
+                    and (r.get("card_eligibility") or "no_card_requirement") != "no_card_requirement"),
                 "eligible": e["eligible"],
                 "reasons": e["reasons"],
                 "notes": r.get("notes"),
@@ -258,6 +318,11 @@ def calculate_stack(store, product_category, customer_type, mrp, price,
             "store": store_name,
             "category": product_category,
             "customer_type": customer_type,
+            "card": ({
+                "bank_name": card.get("bank_name"),
+                "card_type": card.get("card_type"),
+                "card_network": card.get("card_network"),
+            } if card else None),
             "mrp": money_out(mrp),
             "price": money_out(price),
         },

@@ -23,7 +23,7 @@ from typing import List, Optional, Literal
 
 from money import D, q, round_rupee, money_out
 from engine import (calculate_stack, detect_store, detect_category,
-                    rate_is_eligible, category_matches)
+                    rate_is_eligible, category_matches, CARD_ELIGIBILITY_MODES)
 from seed import seed_all, sid, now_iso, STORE_URLS
 
 logging.basicConfig(level=logging.INFO)
@@ -127,6 +127,15 @@ async def require_any_role(user: dict = Depends(get_current_user)) -> dict:
     return user
 
 
+async def get_optional_user(request: Request):
+    """Like get_current_user but returns None for anonymous callers instead of 401.
+    Used by endpoints that work for guests but can be personalized when authed."""
+    try:
+        return await get_current_user(request)
+    except HTTPException:
+        return None
+
+
 async def audit(user: dict, action: str, entity_type: str, entity_id: str,
                 before=None, after=None, request: Request = None):
     await db.audit_log.insert_one({
@@ -222,6 +231,8 @@ class CalcBody(BaseModel):
     customer_type: Literal["new", "existing", "both"] = "existing"
     mrp: float
     price: float
+    # Optional: one of the authenticated shopper's own saved card profiles.
+    card_id: Optional[str] = None
 
     @field_validator("mrp", "price")
     @classmethod
@@ -527,7 +538,7 @@ async def _resolve_store(store_id=None, store_name=None):
 
 
 @api.post("/calculate")
-async def calculate(body: CalcBody):
+async def calculate(body: CalcBody, request: Request):
     store = await _resolve_store(body.store_id, body.store_name)
     if not store:
         # Fallback estimate flagged clearly
@@ -538,8 +549,23 @@ async def calculate(body: CalcBody):
     else:
         aff, gc = await _load_rates_for(store["id"])
         fallback = False
+
+    # Optional payment card: must be one of the caller's OWN saved profiles.
+    # Guests and no-card requests calculate exactly as before (card=None).
+    card = None
+    if body.card_id:
+        caller = await get_optional_user(request)
+        if not caller:
+            raise HTTPException(status_code=401, detail="Log in to use a saved card")
+        owned = await db.card_profiles.find_one(
+            {"id": body.card_id, "user_id": caller["id"]},
+            {"_id": 0, "bank_name": 1, "card_type": 1, "card_network": 1})
+        if not owned:
+            raise HTTPException(status_code=404, detail="Card not found")
+        card = owned
+
     result = calculate_stack(store, body.category, body.customer_type, body.mrp,
-                             body.price, aff, gc, rate_version=RATE_VERSION)
+                             body.price, aff, gc, rate_version=RATE_VERSION, card=card)
     result["fallback"] = fallback
 
     # Enrich routes with the partner's website (editable in the console) so the UI
@@ -955,6 +981,35 @@ async def _enrich_rate(body):
     return plat, store, cat
 
 
+CARD_NETWORK_VALUES = ("Visa", "Mastercard", "RuPay", "American Express", "Other")
+CARD_TYPE_VALUES = ("Credit", "Debit")
+
+
+def _validate_card_rule(body):
+    """Validate optional card-eligibility config on a rate (admin-managed)."""
+    mode = body.get("card_eligibility") or "no_card_requirement"
+    if mode not in CARD_ELIGIBILITY_MODES:
+        raise HTTPException(400, f"card_eligibility must be one of {', '.join(CARD_ELIGIBILITY_MODES)}")
+    crit = body.get("card_criteria") or {}
+    if not isinstance(crit, dict):
+        raise HTTPException(400, "card_criteria must be an object")
+    if crit.get("card_network") and crit["card_network"] not in CARD_NETWORK_VALUES:
+        raise HTTPException(400, "card_criteria.card_network is invalid")
+    if crit.get("card_type") and crit["card_type"] not in CARD_TYPE_VALUES:
+        raise HTTPException(400, "card_criteria.card_type is invalid")
+    if mode == "bank" and not (crit.get("bank_name") or "").strip():
+        raise HTTPException(400, "card_criteria.bank_name is required for bank eligibility")
+    if mode == "network" and not crit.get("card_network"):
+        raise HTTPException(400, "card_criteria.card_network is required for network eligibility")
+    if mode == "specific_card" and not any(
+            crit.get(k) for k in ("bank_name", "card_type", "card_network")):
+        raise HTTPException(400, "specific_card requires at least one card_criteria attribute")
+    # Never allow credential-like keys to sneak into criteria
+    forbidden = {"card_number", "cvv", "expiry", "expiry_date", "pin", "otp"} & {k.lower() for k in crit}
+    if forbidden:
+        raise HTTPException(400, "card_criteria must not contain sensitive card data")
+
+
 def _validate_rate_body(body):
     if D(body.get("value")) < 0:
         raise HTTPException(400, "Value must be non-negative")
@@ -964,6 +1019,7 @@ def _validate_rate_body(body):
     vf, vu = body.get("valid_from"), body.get("valid_until")
     if vf and vu and str(vf) > str(vu):
         raise HTTPException(400, "valid_from must be before valid_until")
+    _validate_card_rule(body)
 
 
 @api.get("/admin/rates")
@@ -998,6 +1054,8 @@ async def create_rate(body: dict, request: Request, user=Depends(require_write))
         "minimum_order_value": (str(body["minimum_order_value"]) if body.get("minimum_order_value") not in (None, "") else None),
         "maximum_eligible_amount": (str(body["maximum_eligible_amount"]) if body.get("maximum_eligible_amount") not in (None, "") else None),
         "valid_from": body.get("valid_from"), "valid_until": body.get("valid_until"),
+        "card_eligibility": body.get("card_eligibility") or "no_card_requirement",
+        "card_criteria": body.get("card_criteria") or None,
         "priority": int(body.get("priority", 0)), "notes": body.get("notes"),
         "active": bool(body.get("active", True)),
         "status": body.get("status", "published"),
@@ -1019,7 +1077,7 @@ async def update_rate(rid: str, body: dict, request: Request, user=Depends(requi
     upd = {}
     for f in ("customer_type", "value_type", "value", "minimum_order_value",
               "maximum_eligible_amount", "valid_from", "valid_until", "priority",
-              "notes", "active", "status"):
+              "notes", "active", "status", "card_eligibility", "card_criteria"):
         if f in body:
             v = body[f]
             if f in ("value", "minimum_order_value", "maximum_eligible_amount") and v not in (None, ""):

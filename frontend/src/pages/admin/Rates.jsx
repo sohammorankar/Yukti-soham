@@ -12,7 +12,17 @@ const emptyForm = {
   platform_id: "", store_id: "", category_id: "", customer_type: "both",
   value_type: "percent", value: "", minimum_order_value: "", maximum_eligible_amount: "",
   valid_from: "", valid_until: "", priority: 0, notes: "", status: "published", active: true,
+  card_eligibility: "no_card_requirement", card_bank: "", card_type: "", card_network: "",
 };
+
+const CARD_MODES = [
+  ["no_card_requirement", "No card requirement"],
+  ["any_card", "Any saved card"],
+  ["specific_card", "Specific card"],
+  ["bank", "Specific bank"],
+  ["network", "Card network"],
+];
+const CARD_NETWORKS = ["Visa", "Mastercard", "RuPay", "American Express", "Other"];
 
 export default function Rates() {
   useMeta("Rate Editor · Console", "");
@@ -44,12 +54,30 @@ export default function Rates() {
 
   const openNew = () => { setForm({ ...emptyForm, category_id: categories.find((c) => c.name === "All")?.id || "" }); setEditId(null); setOpen(true); };
   const openEdit = (r) => {
-    setForm({ ...emptyForm, ...r, minimum_order_value: r.minimum_order_value || "", maximum_eligible_amount: r.maximum_eligible_amount || "", valid_from: r.valid_from || "", valid_until: r.valid_until || "", notes: r.notes || "" });
+    const crit = r.card_criteria || {};
+    setForm({ ...emptyForm, ...r, minimum_order_value: r.minimum_order_value || "", maximum_eligible_amount: r.maximum_eligible_amount || "", valid_from: r.valid_from || "", valid_until: r.valid_until || "", notes: r.notes || "",
+      card_eligibility: r.card_eligibility || "no_card_requirement",
+      card_bank: crit.bank_name || "", card_type: crit.card_type || "", card_network: crit.card_network || "" });
     setEditId(r.id); setOpen(true);
   };
   const save = async () => {
     try {
       const payload = { ...form };
+      // Build the backend card_criteria object from the flat admin fields.
+      if (payload.card_eligibility === "no_card_requirement" || payload.card_eligibility === "any_card") {
+        payload.card_criteria = null;
+      } else {
+        payload.card_criteria = {};
+        if (payload.card_bank.trim()) payload.card_criteria.bank_name = payload.card_bank.trim();
+        if (payload.card_eligibility === "specific_card") {
+          if (payload.card_type) payload.card_criteria.card_type = payload.card_type;
+          if (payload.card_network) payload.card_criteria.card_network = payload.card_network;
+          if (payload.card_bank.trim()) payload.card_criteria.label = payload.card_bank.trim();
+        } else if (payload.card_eligibility === "network") {
+          payload.card_criteria = payload.card_network ? { card_network: payload.card_network } : {};
+        }
+      }
+      delete payload.card_bank; delete payload.card_type; delete payload.card_network;
       if (editId) await api.put(`/admin/rates/${editId}`, payload);
       else await api.post("/admin/rates", payload);
       toast.success("Rate saved"); setOpen(false); loadRates();
@@ -94,7 +122,10 @@ export default function Rates() {
                 <td className="p-3 text-ink-muted">{r.store_name}</td>
                 <td className="p-3 text-ink-muted">{r.category_name}</td>
                 <td className="p-3 text-ink-muted">{r.customer_type}</td>
-                <td className="p-3 savings-text font-600">{rateLabel(r.value_type, r.value)}</td>
+                <td className="p-3 savings-text font-600">{rateLabel(r.value_type, r.value)}
+                  {r.card_eligibility && r.card_eligibility !== "no_card_requirement" && (
+                    <span className="ml-1 rounded-full bg-gold/15 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-gold" data-testid={`rate-card-badge-${r.id}`}>card</span>
+                  )}</td>
                 <td className="p-3 text-ink-muted">{r.minimum_order_value ? `₹${r.minimum_order_value}` : "—"}</td>
                 <td className="p-3 text-ink-muted">{r.maximum_eligible_amount ? `₹${r.maximum_eligible_amount}` : "—"}</td>
                 <td className="p-3"><span className={`text-xs ${r.status === "published" ? "text-savings" : "text-amber-400"}`}>{r.status}</span></td>
@@ -131,6 +162,20 @@ export default function Rates() {
             <F label="Valid from"><input type="date" value={form.valid_from} onChange={(e) => setForm({ ...form, valid_from: e.target.value })} className="in" /></F>
             <F label="Valid until"><input type="date" value={form.valid_until} onChange={(e) => setForm({ ...form, valid_until: e.target.value })} className="in" /></F>
             <F label="Status"><select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })} className="in"><option value="published">Published</option><option value="draft">Draft</option></select></F>
+            <F label="Card eligibility" full>
+              <select value={form.card_eligibility} onChange={(e) => setForm({ ...form, card_eligibility: e.target.value })} data-testid="rate-card-eligibility" className="in">
+                {CARD_MODES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              </select>
+            </F>
+            {(form.card_eligibility === "specific_card" || form.card_eligibility === "bank") && (
+              <F label="Bank name" full><input value={form.card_bank} onChange={(e) => setForm({ ...form, card_bank: e.target.value })} data-testid="rate-card-bank" placeholder="e.g. SBI" className="in" /></F>
+            )}
+            {form.card_eligibility === "specific_card" && (
+              <F label="Card type"><select value={form.card_type} onChange={(e) => setForm({ ...form, card_type: e.target.value })} data-testid="rate-card-type" className="in"><option value="">Any type</option><option value="Credit">Credit</option><option value="Debit">Debit</option></select></F>
+            )}
+            {(form.card_eligibility === "specific_card" || form.card_eligibility === "network") && (
+              <F label="Card network"><select value={form.card_network} onChange={(e) => setForm({ ...form, card_network: e.target.value })} data-testid="rate-card-network" className="in"><option value="">Any network</option>{CARD_NETWORKS.map((n) => <option key={n} value={n}>{n}</option>)}</select></F>
+            )}
             <F label="Notes" full><input value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} className="in" /></F>
           </div>
           <DialogFooter><button onClick={save} data-testid="rate-save" className="btn-gold rounded-full px-5 py-2 text-sm font-700">Save rate</button></DialogFooter>

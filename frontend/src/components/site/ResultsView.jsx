@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
   CheckCircle2, XCircle, AlertTriangle, TrendingUp, Receipt, Layers, Info,
-  ChevronDown, ArrowUpRight, Store as StoreIcon, Star, Gift, Percent,
+  ChevronDown, ArrowUpRight, Store as StoreIcon, Star, Gift, Percent, CreditCard,
 } from "lucide-react";
 import { money, moneyExact } from "@/lib/format";
 import { EmotionalPanel } from "@/components/site/EmotionalPanel";
@@ -93,6 +93,19 @@ export function ResultsView({ result }) {
               </span>
             )}
           </div>
+
+          {/* Selected payment card context (only when the shopper chose one) */}
+          {result.inputs?.card && (
+            <p className="mt-3 flex flex-wrap items-center gap-1.5 text-xs text-ink-muted" data-testid="result-card-used">
+              <CreditCard className="h-3.5 w-3.5 text-gold" />
+              Using {result.inputs.card.bank_name} · {result.inputs.card.card_type} · {result.inputs.card.card_network}
+              {(result.affiliate?.best?.card_rule_applied || result.gift_card?.best?.card_rule_applied) && (
+                <span className="rounded-full bg-savings/15 px-2 py-0.5 text-[10px] font-600 text-savings" data-testid="card-offer-applied">
+                  Eligible card offer applied
+                </span>
+              )}
+            </p>
+          )}
           <div className="mt-4 flex flex-wrap items-end gap-x-3 gap-y-1">
             <span className="font-display text-5xl font-700 savings-text" data-testid="result-extra-saved">
               {money(s.extra_saved)}
