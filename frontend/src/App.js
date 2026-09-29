@@ -26,6 +26,7 @@ import Rates from "@/pages/admin/Rates";
 import Matrix from "@/pages/admin/Matrix";
 import Audit from "@/pages/admin/Audit";
 import CardCatalogue from "@/pages/admin/CardCatalogue";
+import AffiliateDestinations from "@/pages/admin/AffiliateDestinations";
 
 export default function App() {
   return (
@@ -66,6 +67,7 @@ export default function App() {
               <Route path="categories" element={<CategoriesAdmin />} />
               <Route path="rates" element={<Rates />} />
               <Route path="matrix" element={<Matrix />} />
+              <Route path="affiliate-destinations" element={<AffiliateDestinations />} />
               <Route path="cards" element={<CardCatalogue />} />
               <Route path="audit" element={<Audit />} />
             </Route>

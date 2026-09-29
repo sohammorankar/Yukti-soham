@@ -18,6 +18,7 @@ import bcrypt
 from fastapi import FastAPI, APIRouter, Request, Response, HTTPException, Depends, Query
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo.errors import DuplicateKeyError
 from pydantic import BaseModel, Field, EmailStr, field_validator
 from typing import List, Optional, Literal
 
@@ -154,6 +155,29 @@ def clean(doc: dict) -> dict:
         return doc
     doc.pop("_id", None)
     return doc
+
+
+def _norm_slug(v: str) -> str:
+    """Normalize a partner/store name to a comparable slug (alnum, lowercase)."""
+    return re.sub(r"[^a-z0-9]", "", (v or "").lower())
+
+
+_UNSAFE_URL_SCHEMES = ("javascript:", "data:", "file:", "vbscript:", "about:", "blob:", "ftp:")
+
+
+def _is_safe_http_url(url: str) -> bool:
+    """Only trust absolute http(s) URLs. Rejects unsafe schemes (javascript:,
+    data:, file:, etc.) and anything without a proper http(s) host — this is the
+    single guard that keeps the redirect resolver free of open-redirect / XSS
+    injection surfaces."""
+    if not url or not isinstance(url, str):
+        return False
+    u = url.strip()
+    low = u.lower()
+    if any(low.startswith(s) for s in _UNSAFE_URL_SCHEMES):
+        return False
+    # Must be an absolute http(s) URL with a host segment.
+    return bool(re.match(r"^https?://[^\s/@]+", u, re.I))
 
 
 # --------------------------------------------------------------------------
@@ -335,6 +359,10 @@ async def startup():
     await db.card_profiles.create_index("id", unique=True)
     await db.card_profiles.create_index("user_id")
     await db.card_catalogue.create_index("id", unique=True)
+    # Store × Affiliate Partner destination mappings (Step: Affiliate Destinations)
+    await db.affiliate_destinations.create_index("id", unique=True)
+    await db.affiliate_destinations.create_index(
+        [("store_id", 1), ("platform_id", 1)], unique=True)
     for coll in ["platforms", "stores", "categories", "rate_cards"]:
         await db[coll].create_index("id", unique=True)
     await db.store_domains.create_index("domain_or_alias", unique=True)
@@ -825,29 +853,47 @@ async def trending():
 
 
 @api.get("/redirect/{slug}")
-async def partner_redirect(slug: str):
+async def partner_redirect(slug: str, store: Optional[str] = None):
     """Resolve a trusted external destination for a KNOWN partner (no open redirect).
 
     The frontend never supplies the external URL — it only passes a partner slug
-    (normalized platform name). Only partners that exist in the platforms collection
-    with a valid http(s) website_url can be resolved. The destination is fully
-    backend-controlled and editable via the existing Admin → Platforms UI.
-    """
-    def _norm(v):
-        return re.sub(r"[^a-z0-9]", "", (v or "").lower())
+    (normalized platform name) plus optional non-sensitive `store` context. The
+    destination is fully backend-controlled:
 
-    target = _norm(slug)
+      1. If an ACTIVE Store × Affiliate Partner mapping exists for this
+         combination, its configured deep-link destination_url is used.
+      2. Otherwise we fall back to the partner's generic platform website_url
+         (existing behavior — fully backward compatible).
+
+    Only http(s) destinations that pass the safe-URL check are ever returned.
+    """
+    target = _norm_slug(slug)
     if not target:
         raise HTTPException(status_code=404, detail="Unknown partner")
     plats = await db.platforms.find(
-        {"archived_at": None}, {"_id": 0, "name": 1, "website_url": 1, "kind": 1}).to_list(500)
-    match = next((p for p in plats if _norm(p.get("name")) == target), None)
+        {"archived_at": None},
+        {"_id": 0, "id": 1, "name": 1, "website_url": 1, "kind": 1}).to_list(500)
+    match = next((p for p in plats if _norm_slug(p.get("name")) == target), None)
     if not match:
         raise HTTPException(status_code=404, detail="Unknown partner")
+
+    # (1) Store × Affiliate Partner mapping takes precedence when active + valid.
+    if store:
+        st = await _resolve_store(store_name=store)
+        if st:
+            mapping = await db.affiliate_destinations.find_one(
+                {"store_id": st["id"], "platform_id": match["id"], "active": True},
+                {"_id": 0})
+            if mapping and _is_safe_http_url(mapping.get("destination_url")):
+                return {"partner": match["name"], "kind": match.get("kind"),
+                        "url": mapping["destination_url"].strip(),
+                        "store": st["name"], "mapping": True}
+
+    # (2) Generic partner destination fallback (unchanged behavior).
     url = (match.get("website_url") or "").strip()
-    if not url or not re.match(r"^https?://", url, re.I):
+    if not _is_safe_http_url(url):
         raise HTTPException(status_code=404, detail="No trusted destination configured for this partner")
-    return {"partner": match["name"], "kind": match.get("kind"), "url": url}
+    return {"partner": match["name"], "kind": match.get("kind"), "url": url, "mapping": False}
 
 
 @api.post("/detect")
@@ -992,6 +1038,95 @@ async def restore_platform(pid: str, request: Request, user=Depends(require_writ
     await db.platforms.update_one({"id": pid}, {"$set": {"active": True, "archived_at": None}})
     await audit(user, "restore", "platform", pid, None, None, request)
     return {"restored": True}
+
+
+# ---- Affiliate Destinations (Store × Affiliate Partner deep-link mapping) ----
+async def _enrich_destination(d, stores_by_id, plats_by_id):
+    d = dict(d)
+    st = stores_by_id.get(d.get("store_id")) or {}
+    pl = plats_by_id.get(d.get("platform_id")) or {}
+    d["store_name"] = st.get("name")
+    d["partner_name"] = pl.get("name")
+    return d
+
+
+@api.get("/admin/affiliate-destinations")
+async def admin_affiliate_destinations(user=Depends(require_any_role)):
+    """List all Store × Affiliate Partner destination mappings (admin-only)."""
+    rows = await db.affiliate_destinations.find({}, {"_id": 0}).sort("created_at", -1).to_list(2000)
+    stores = {s["id"]: s for s in await db.stores.find({}, {"_id": 0, "id": 1, "name": 1}).to_list(1000)}
+    plats = {p["id"]: p for p in await db.platforms.find({}, {"_id": 0, "id": 1, "name": 1, "kind": 1}).to_list(1000)}
+    return [await _enrich_destination(r, stores, plats) for r in rows]
+
+
+@api.post("/admin/affiliate-destinations")
+async def create_affiliate_destination(body: dict, request: Request, user=Depends(require_write)):
+    """Create a trusted Store × Affiliate Partner destination mapping. Validates
+    that the store & affiliate partner exist and the destination is a safe
+    http(s) URL. Enforces one mapping per Store × Partner combination."""
+    store_id = (body.get("store_id") or "").strip()
+    platform_id = (body.get("platform_id") or "").strip()
+    dest = (body.get("destination_url") or "").strip()
+    if not store_id or not platform_id:
+        raise HTTPException(400, "store_id and platform_id are required")
+    store = await db.stores.find_one({"id": store_id}, {"_id": 0})
+    if not store:
+        raise HTTPException(404, "Store not found")
+    plat = await db.platforms.find_one({"id": platform_id}, {"_id": 0})
+    if not plat:
+        raise HTTPException(404, "Affiliate partner not found")
+    if plat.get("kind") != "affiliate":
+        raise HTTPException(400, "Selected partner is not an affiliate partner")
+    if not _is_safe_http_url(dest):
+        raise HTTPException(400, "destination_url must be a valid http(s) URL (unsafe schemes are rejected)")
+    if await db.affiliate_destinations.find_one({"store_id": store_id, "platform_id": platform_id}):
+        raise HTTPException(409, "A mapping for this Store × Affiliate Partner already exists")
+    doc = {"id": str(uuid.uuid4()), "store_id": store_id, "platform_id": platform_id,
+           "destination_url": dest, "active": bool(body.get("active", True)),
+           "created_at": now_iso(), "updated_at": now_iso()}
+    try:
+        await db.affiliate_destinations.insert_one(dict(doc))
+    except DuplicateKeyError:
+        raise HTTPException(409, "A mapping for this Store × Affiliate Partner already exists")
+    await audit(user, "create", "affiliate_destination", doc["id"], None, doc, request)
+    return clean(doc)
+
+
+@api.put("/admin/affiliate-destinations/{mid}")
+async def update_affiliate_destination(mid: str, body: dict, request: Request, user=Depends(require_write)):
+    """Update a mapping's destination_url and/or active flag. The Store × Partner
+    combination itself is immutable (delete + recreate to re-target)."""
+    before = await db.affiliate_destinations.find_one({"id": mid}, {"_id": 0})
+    if not before:
+        raise HTTPException(404, "Not found")
+    upd = {}
+    if "destination_url" in body:
+        dest = (body.get("destination_url") or "").strip()
+        if not _is_safe_http_url(dest):
+            raise HTTPException(400, "destination_url must be a valid http(s) URL (unsafe schemes are rejected)")
+        upd["destination_url"] = dest
+    if "active" in body:
+        upd["active"] = bool(body["active"])
+    if not upd:
+        raise HTTPException(400, "Nothing to update")
+    upd["updated_at"] = now_iso()
+    await db.affiliate_destinations.update_one({"id": mid}, {"$set": upd})
+    after = await db.affiliate_destinations.find_one({"id": mid}, {"_id": 0})
+    await audit(user, "update", "affiliate_destination", mid, before, after, request)
+    return after
+
+
+@api.delete("/admin/affiliate-destinations/{mid}")
+async def delete_affiliate_destination(mid: str, request: Request, user=Depends(require_write)):
+    """Remove a Store × Affiliate Partner mapping. Safe hard-delete: this is a
+    standalone config row not referenced by rates/calculations, and removal
+    simply reverts the combination to the generic partner fallback."""
+    before = await db.affiliate_destinations.find_one({"id": mid}, {"_id": 0})
+    if not before:
+        raise HTTPException(404, "Not found")
+    await db.affiliate_destinations.delete_one({"id": mid})
+    await audit(user, "delete", "affiliate_destination", mid, before, None, request)
+    return {"deleted": True}
 
 
 # ---- Stores + settings ----

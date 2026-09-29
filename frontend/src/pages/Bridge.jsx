@@ -26,7 +26,13 @@ export default function Bridge() {
 
     (async () => {
       try {
-        const { data } = await api.get(`/redirect/${encodeURIComponent(partner)}`);
+        // Pass non-sensitive store context so the backend can resolve a
+        // Store × Affiliate Partner deep-link mapping when one is configured.
+        // The external URL is still resolved entirely by the backend.
+        const path = store
+          ? `/redirect/${encodeURIComponent(partner)}?store=${encodeURIComponent(store)}`
+          : `/redirect/${encodeURIComponent(partner)}`;
+        const { data } = await api.get(path);
         if (cancelled) return;
         setPartnerName(data.partner || partner);
         // Keep the transition visible ~1.4s minimum, but never wait longer than needed.
@@ -48,7 +54,7 @@ export default function Bridge() {
     })();
 
     return () => { cancelled = true; };
-  }, [partner]);
+  }, [partner, store]);
 
   return (
     <div className="grid min-h-screen place-items-center overflow-hidden px-4">
