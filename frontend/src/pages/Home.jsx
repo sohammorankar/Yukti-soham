@@ -8,6 +8,39 @@ import { TrendingDeals, SectionHead } from "@/components/site/TrendingDeals";
 import { MandirContext } from "@/components/site/SiteLayout";
 import { api } from "@/lib/api";
 
+const BRAND_ASSETS = {
+  amazon: "/assets/brands/amazon.png",
+  flipkart: "/assets/brands/flipkart.svg",
+  firstcry: "/assets/brands/firstcry.png",
+  tatacliq: "/assets/brands/tata-cliq.svg",
+  myntra: "/assets/brands/myntra.png",
+  nykaa: "/assets/brands/nykaa.svg",
+};
+
+const CATEGORY_ASSETS = {
+  beauty: "/assets/categories/beauty-grooming.webp",
+  "kitchen & dining": "/assets/categories/kitchen-dining.webp",
+  electronics: "/assets/categories/electronics.webp",
+  fashion: "/assets/categories/fashion.webp",
+  "mobiles & smartphones": "/assets/categories/mobiles-smartphones.webp",
+  "pharmacy & healthcare": "/assets/categories/pharmacy-healthcare.webp",
+};
+
+const normalizeAssetKey = (value = "") =>
+  value.toLowerCase().replace(/[^a-z0-9]+/g, "").trim();
+
+const getBrandAsset = (name) => BRAND_ASSETS[normalizeAssetKey(name)];
+const getCategoryAsset = (name) => {
+  const normalized = name.toLowerCase().replace(/\s+/g, " ").trim();
+  return CATEGORY_ASSETS[normalized];
+};
+
+const AssetFallback = ({ label, className = "" }) => (
+  <div className={`grid place-items-center rounded-lg border border-gold/20 bg-black/20 text-lg font-display font-700 text-gold ${className}`}>
+    {label?.trim()?.[0]?.toUpperCase() || "Y"}
+  </div>
+);
+
 export default function Home() {
   const [result, setResult] = useState(null);
   const [initial, setInitial] = useState(null);
@@ -100,26 +133,56 @@ export default function Home() {
         <SectionHead icon={Store} eyebrow="Active stores" title="Shop by Brand"
           sub="Stores are populated live from the database and managed in the Rate Console." />
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">
-          {stores.map((s) => (
-            <Link key={s.id} to={`/brands?store=${encodeURIComponent(s.name)}`}
-              data-testid={`brand-${s.name.toLowerCase().replace(/[^a-z]+/g, "-")}`}
-              className="surface flex h-20 items-center justify-center rounded-xl px-3 text-center text-sm font-600 text-ink transition-all hover:border-gold/40 hover:text-gold">
-              {s.name}
-            </Link>
-          ))}
+          {stores.map((s) => {
+            const image = getBrandAsset(s.name);
+            return (
+              <Link key={s.id} to={`/brands?store=${encodeURIComponent(s.name)}`}
+                data-testid={`brand-${s.name.toLowerCase().replace(/[^a-z]+/g, "-")}`}
+                className="surface flex min-h-28 flex-col items-center justify-center gap-2 rounded-xl px-3 py-3 text-center text-sm font-600 text-ink transition-all hover:border-gold/40 hover:text-gold">
+                <div className="h-12 w-28 overflow-hidden rounded-lg bg-white/95 p-1.5">
+                  {image ? (
+                    <img
+                      src={image}
+                      alt={`${s.name} logo`}
+                      className="h-full w-full object-contain"
+                      loading="lazy"
+                    />
+                  ) : (
+                    <AssetFallback label={s.name} className="h-full w-full" />
+                  )}
+                </div>
+                <span>{s.name}</span>
+              </Link>
+            );
+          })}
         </div>
       </section>
 
       {/* Shop by category */}
       <section className="mx-auto max-w-7xl px-4 sm:px-6" data-testid="categories-section">
         <SectionHead icon={Tags} eyebrow="Active categories" title="Shop by Category" />
-        <div className="flex flex-wrap gap-2.5">
-          {categories.map((c) => (
-            <Link key={c.id} to={`/categories?c=${encodeURIComponent(c.name)}`}
-              className="surface rounded-full px-4 py-2 text-sm text-ink transition-colors hover:border-gold/40 hover:text-gold">
-              {c.name}
-            </Link>
-          ))}
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+          {categories.map((c) => {
+            const image = getCategoryAsset(c.name);
+            return (
+              <Link key={c.id} to={`/categories?c=${encodeURIComponent(c.name)}`}
+                className="surface group overflow-hidden rounded-xl text-ink transition-all hover:border-gold/40">
+                <div className="h-24 overflow-hidden bg-black/20">
+                  {image ? (
+                    <img
+                      src={image}
+                      alt={`${c.name} category`}
+                      className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                      loading="lazy"
+                    />
+                  ) : (
+                    <AssetFallback label={c.name} className="h-full w-full rounded-none border-0" />
+                  )}
+                </div>
+                <div className="px-3 py-2.5 text-center text-sm font-600 group-hover:text-gold">{c.name}</div>
+              </Link>
+            );
+          })}
         </div>
       </section>
 
