@@ -139,7 +139,7 @@ export default function Home() {
 
       <TrendingDeals onPick={pickDeal} />
 
-      {/* Shop by brand */}
+      {/* Save by brand */}
       <section className="mx-auto max-w-7xl px-4 sm:px-6" data-testid="brands-section">
         <SectionHead icon={Store} eyebrow="Active stores" title="Shop by Brand"
           sub="Stores are populated live from the database and managed in the Rate Console." />
@@ -169,7 +169,7 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Shop by category */}
+      {/* Save by category */}
       <section className="mx-auto max-w-7xl px-4 sm:px-6" data-testid="categories-section">
         <SectionHead icon={Tags} eyebrow="Active categories" title="Shop by Category" />
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
