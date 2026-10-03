@@ -27,7 +27,7 @@ const BRAND_ASSETS = {
   swiggyinstamart: "/assets/brands/swiggy-instamart.png",
   zomato: "/assets/brands/zomato.svg",
 
-  timesprime: "/assets/brands/timesprime.png",
+  timesprime: "/assets/brands/timesprime.jpg",
   emergent: "/assets/brands/emergent.png",
 };
 
