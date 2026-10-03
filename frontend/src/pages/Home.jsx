@@ -15,6 +15,8 @@ const BRAND_ASSETS = {
   tatacliq: "/assets/brands/tata-cliq.svg",
   myntra: "/assets/brands/myntra.png",
   nykaa: "/assets/brands/nykaa.svg",
+  ajio: "/assets/brands/ajio.jpg",
+  foxtale: "/assets/brands/foxtale.jpg",
 
   blinkit: "/assets/brands/blinkit.png",
   dotkey: "/assets/brands/dot-key.svg",
