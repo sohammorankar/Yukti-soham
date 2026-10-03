@@ -26,6 +26,9 @@ const BRAND_ASSETS = {
   shyaway: "/assets/brands/shyaway.jpg",
   swiggyinstamart: "/assets/brands/swiggy-instamart.png",
   zomato: "/assets/brands/zomato.svg",
+
+  timesprime: "/assets/brands/timesprime.png",
+  emergent: "/assets/brands/emergent.png",
 };
 
 const CATEGORY_ASSETS = {
