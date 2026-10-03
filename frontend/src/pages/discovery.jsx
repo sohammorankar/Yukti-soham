@@ -8,15 +8,7 @@ import { CheckCircle2, XCircle, HelpCircle } from "lucide-react";
 const STACK_ICON = { allowed: CheckCircle2, not_allowed: XCircle, unsure: HelpCircle };
 const STACK_COLOR = { allowed: "text-savings", not_allowed: "text-destructive", unsure: "text-amber-400" };
 
-const BRAND_ASSETS = {
-  amazon: "/assets/brands/amazon.png",
-  flipkart: "/assets/brands/flipkart.svg",
-  firstcry: "/assets/brands/firstcry.png",
-  tatacliq: "/assets/brands/tata-cliq.svg",
-  myntra: "/assets/brands/myntra.png",
-  nykaa: "/assets/brands/nykaa.svg",
-};
-
+frontend/src/pages/discovery.jsx
 const CATEGORY_ASSETS = {
   beauty: "/assets/categories/beauty-grooming.webp",
   "kitchen & dining": "/assets/categories/kitchen-dining.webp",
