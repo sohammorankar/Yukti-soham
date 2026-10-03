@@ -15,6 +15,15 @@ const BRAND_ASSETS = {
   tatacliq: "/assets/brands/tata-cliq.svg",
   myntra: "/assets/brands/myntra.png",
   nykaa: "/assets/brands/nykaa.svg",
+
+  blinkit: "/assets/brands/blinkit.png",
+  dotkey: "/assets/brands/dot-key.svg",
+  hyugalife: "/assets/brands/hyugalife.jpg",
+  koparoclean: "/assets/brands/koparo-clean.jpg",
+  shopsy: "/assets/brands/shopsy.png",
+  shyaway: "/assets/brands/shyaway.jpg",
+  swiggyinstamart: "/assets/brands/swiggy-instamart.png",
+  zomato: "/assets/brands/zomato.svg",
 };
 
 const CATEGORY_ASSETS = {
