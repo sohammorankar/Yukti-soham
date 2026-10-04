@@ -4,50 +4,11 @@ import { motion } from "framer-motion";
 import { Sparkles, Store, Tags, ShieldCheck, Users, ArrowRight, Flame, Zap } from "lucide-react";
 import { SavingsEngine } from "@/components/site/SavingsEngine";
 import { ResultsView } from "@/components/site/ResultsView";
+import { YuktiMagic } from "@/components/site/YuktiMagic";
 import { TrendingDeals, SectionHead } from "@/components/site/TrendingDeals";
 import { MandirContext } from "@/components/site/SiteLayout";
 import { api } from "@/lib/api";
-
-const BRAND_ASSETS = {
-  amazon: "/assets/brands/amazon.png",
-  flipkart: "/assets/brands/flipkart.svg",
-  firstcry: "/assets/brands/firstcry.png",
-  tatacliq: "/assets/brands/tata-cliq.svg",
-  myntra: "/assets/brands/myntra.png",
-  nykaa: "/assets/brands/nykaa.svg",
-  ajio: "/assets/brands/ajio.jpg",
-  foxtale: "/assets/brands/foxtale.jpg",
-
-  blinkit: "/assets/brands/blinkit.png",
-  dotkey: "/assets/brands/dot-key.svg",
-  hyugalife: "/assets/brands/hyugalife.jpg",
-  koparoclean: "/assets/brands/koparo-clean.jpg",
-  shopsy: "/assets/brands/shopsy.png",
-  shyaway: "/assets/brands/shyaway.jpg",
-  swiggyinstamart: "/assets/brands/swiggy-instamart.png",
-  zomato: "/assets/brands/zomato.svg",
-
-  timesprime: "/assets/brands/timesprime.jpg",
-  emergent: "/assets/brands/emergent.png",
-};
-
-const CATEGORY_ASSETS = {
-  beauty: "/assets/categories/beauty-grooming.webp",
-  "kitchen & dining": "/assets/categories/kitchen-dining.webp",
-  electronics: "/assets/categories/electronics.webp",
-  fashion: "/assets/categories/fashion.webp",
-  "mobiles & smartphones": "/assets/categories/mobiles-smartphones.webp",
-  "pharmacy & healthcare": "/assets/categories/pharmacy-healthcare.webp",
-};
-
-const normalizeAssetKey = (value = "") =>
-  value.toLowerCase().replace(/[^a-z0-9]+/g, "").trim();
-
-const getBrandAsset = (name) => BRAND_ASSETS[normalizeAssetKey(name)];
-const getCategoryAsset = (name) => {
-  const normalized = name.toLowerCase().replace(/\s+/g, " ").trim();
-  return CATEGORY_ASSETS[normalized];
-};
+import { getBrandAsset, getCategoryAsset } from "@/lib/assets";
 
 const AssetFallback = ({ label, className = "" }) => (
   <div className={`grid place-items-center rounded-lg border border-gold/20 bg-black/20 text-lg font-display font-700 text-gold ${className}`}>
@@ -57,6 +18,8 @@ const AssetFallback = ({ label, className = "" }) => (
 
 export default function Home() {
   const [result, setResult] = useState(null);
+  const [magic, setMagic] = useState(false);
+  const handleResult = (data) => { setResult(data); setMagic(true); };
   const [initial, setInitial] = useState(null);
   const [stores, setStores] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -87,6 +50,7 @@ export default function Home() {
 
   return (
     <div className="space-y-20 pb-10">
+      {magic && <YuktiMagic onDone={() => setMagic(false)} />}
       {/* Hero + engine */}
       <section className="relative overflow-hidden">
         <div className="grid-texture pointer-events-none absolute inset-0 opacity-40" />
@@ -125,7 +89,7 @@ export default function Home() {
           </div>
 
           <div id="engine" className="scroll-mt-20">
-            <SavingsEngine onResult={setResult} initial={initial} />
+            <SavingsEngine onResult={handleResult} initial={initial} />
           </div>
         </div>
       </section>
@@ -145,10 +109,10 @@ export default function Home() {
       {/* Save by brand */}
       <section className="mx-auto max-w-7xl px-4 sm:px-6" data-testid="brands-section">
         <SectionHead icon={Store} eyebrow="Active stores" title="Shop by Brand"
-          sub="Stores are populated live from the database and managed in the Rate Console." />
+          sub="Save at your favourite stores." />
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">
           {stores.map((s) => {
-            const image = getBrandAsset(s.name);
+            const image = s.logo_url || getBrandAsset(s.name);
             return (
               <Link key={s.id} to={`/brands?store=${encodeURIComponent(s.name)}`}
                 data-testid={`brand-${s.name.toLowerCase().replace(/[^a-z]+/g, "-")}`}
