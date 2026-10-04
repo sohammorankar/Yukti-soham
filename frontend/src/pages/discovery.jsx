@@ -4,25 +4,10 @@ import { PageShell } from "@/components/site/PageShell";
 import { TrendingDeals } from "@/components/site/TrendingDeals";
 import { api } from "@/lib/api";
 import { CheckCircle2, XCircle, HelpCircle } from "lucide-react";
+import { getBrandAsset, getCategoryAsset } from "@/lib/assets";
 
 const STACK_ICON = { allowed: CheckCircle2, not_allowed: XCircle, unsure: HelpCircle };
 const STACK_COLOR = { allowed: "text-savings", not_allowed: "text-destructive", unsure: "text-amber-400" };
-
-
-const CATEGORY_ASSETS = {
-  beauty: "/assets/categories/beauty-grooming.webp",
-  "kitchen & dining": "/assets/categories/kitchen-dining.webp",
-  electronics: "/assets/categories/electronics.webp",
-  fashion: "/assets/categories/fashion.webp",
-  "mobiles & smartphones": "/assets/categories/mobiles-smartphones.webp",
-  "pharmacy & healthcare": "/assets/categories/pharmacy-healthcare.webp",
-};
-
-const normalizeAssetKey = (value = "") =>
-  value.toLowerCase().replace(/[^a-z0-9]+/g, "").trim();
-
-const getBrandAsset = (name) => BRAND_ASSETS[normalizeAssetKey(name)];
-const getCategoryAsset = (name) => CATEGORY_ASSETS[name.toLowerCase().replace(/\s+/g, " ").trim()];
 
 const AssetFallback = ({ label, className = "" }) => (
   <div className={`grid place-items-center rounded-lg border border-gold/20 bg-black/20 text-lg font-display font-700 text-gold ${className}`}>
@@ -36,11 +21,11 @@ export function Brands() {
 
   return (
     <PageShell title="Brands" kicker="Active stores"
-      description="Every store we support, with its stacking and split-payment policy. Managed live in the Rate Console.">
+      description="Every store we support — pick one to start finding your best savings route.">
       <div className="grid gap-3 sm:grid-cols-2">
         {stores.map((s) => {
           const Icon = STACK_ICON[s.stacking] || HelpCircle;
-          const image = getBrandAsset(s.name);
+          const image = s.logo_url || getBrandAsset(s.name);
           return (
             <div key={s.id} className="surface rounded-xl p-4" data-testid={`brand-card-${s.name.toLowerCase().replace(/[^a-z]+/g, "-")}`}>
               <div className="flex items-center gap-4">
