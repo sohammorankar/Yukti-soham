@@ -112,7 +112,7 @@ const FAQS = [
   ["Is Existing User selected by default?", "Yes. Choose New User only if this is your first eligible transaction with that store or platform."],
   ["Why can't you guarantee cashback?", "Retailers and affiliate platforms control final categorization, tracking and commission, which change often."],
   ["What is split payment?", "When a gift card is capped, you pay part with the gift card and the remainder via UPI/card. The retailer still sees the full order value, so affiliate cashback can remain eligible."],
-  ["How often do rates update?", "Amazon and Flipkart can change daily. Admins update rates in the Rate Console and the public site reflects them immediately."],
+  ["How often do rates update?", "Amazon and Flipkart can change daily. We keep rates updated and the site reflects the latest instantly."],
 ];
 
 export function FAQ() {
