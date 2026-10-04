@@ -16,64 +16,12 @@ const STATUS_STYLE = {
   verify: { color: "text-amber-400", icon: AlertTriangle },
 };
 
-function RouteCard({ route, label }) {
-  if (!route) return null;
-  const best = route.best;
-  const applied = route.applied;
-  const skipped = route.skipped;
-  return (
-    <div
-      data-testid={`route-${route.kind}`}
-      className={`surface rounded-xl p-4 transition-opacity ${skipped ? "opacity-50" : ""}`}
-    >
-      <div className="flex items-center justify-between">
-        <h5 className="font-display text-sm font-600 text-ink">{label}</h5>
-        {route.has_winner ? (
-          skipped ? (
-            <span data-testid={`route-${route.kind}-skipped`} className="rounded-full bg-destructive/15 px-2 py-0.5 text-[10px] font-600 uppercase text-destructive">
-              Not combinable — skipped
-            </span>
-          ) : (
-            <span className="rounded-full bg-savings/15 px-2 py-0.5 text-[10px] font-600 uppercase text-savings">
-              {applied ? "Applied" : "Best"}
-            </span>
-          )
-        ) : (
-          <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] uppercase text-ink-muted">No eligible rule</span>
-        )}
-      </div>
-
-      {best ? (
-        <div className="mt-3">
-          <div className="flex items-baseline justify-between">
-            <span className={`font-display text-2xl font-700 ${skipped ? "text-ink-muted line-through" : "savings-text"}`}>
-              {money(best.saving)}
-            </span>
-            <span className="text-sm text-ink-muted">
-              {best.platform_name} · {best.value_type === "percent" ? `${best.value}%` : `₹${best.value}`}
-            </span>
-          </div>
-          <dl className="mt-3 grid grid-cols-2 gap-2 text-xs text-ink-muted">
-            <div><dt className="opacity-70">Applies to</dt><dd className="text-ink">{money(best.applied_to)}</dd></div>
-            <div><dt className="opacity-70">Basis</dt><dd className="text-ink">{best.category_name} · {best.customer_type}</dd></div>
-            {best.minimum_order_value && <div><dt className="opacity-70">Min order</dt><dd className="text-ink">₹{best.minimum_order_value}</dd></div>}
-            {best.maximum_eligible_amount && <div><dt className="opacity-70">Cap</dt><dd className="text-ink">₹{best.maximum_eligible_amount}</dd></div>}
-          </dl>
-          {best.notes && <p className="mt-2 text-xs italic text-ink-muted">{best.notes}</p>}
-        </div>
-      ) : (
-        <p className="mt-3 text-sm text-ink-muted">No eligible {label.toLowerCase()} for these inputs yet.</p>
-      )}
-    </div>
-  );
-}
 
 export function ResultsView({ result }) {
   if (!result) return null;
   const s = result.summary;
   const st = STATUS_STYLE[s.status] || STATUS_STYLE.no_saving;
   const StatusIcon = st.icon;
-  const stk = result.stacking;
 
   return (
     <motion.div
@@ -82,14 +30,14 @@ export function ResultsView({ result }) {
       data-testid="results-view"
     >
       <div className="space-y-5">
-        {/* Main summary */}
+        {/* 1 — Savings summary */}
         <div className="surface relative overflow-hidden rounded-2xl p-6">
           <div className="flex items-center gap-2">
             <StatusIcon className={`h-5 w-5 ${st.color}`} />
             <span className={`text-sm font-600 ${st.color}`} data-testid="result-status">{s.status_label}</span>
             {result.fallback && (
               <span className="ml-auto rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] text-amber-400">
-                Fallback estimate — no live rates
+                Estimated — live rates unavailable
               </span>
             )}
           </div>
@@ -101,21 +49,22 @@ export function ResultsView({ result }) {
               Using {result.inputs.card.card_name || result.inputs.card.bank_name} · {result.inputs.card.card_type} · {result.inputs.card.card_network}
               {(result.affiliate?.best?.card_rule_applied || result.gift_card?.best?.card_rule_applied) && (
                 <span className="rounded-full bg-savings/15 px-2 py-0.5 text-[10px] font-600 text-savings" data-testid="card-offer-applied">
-                  Eligible card offer applied
+                  Card offer applied
                 </span>
               )}
             </p>
           )}
+
           <div className="mt-4 flex flex-wrap items-end gap-x-3 gap-y-1">
             <span className="font-display text-5xl font-700 savings-text" data-testid="result-extra-saved">
               {money(s.extra_saved)}
             </span>
-            <span className="pb-1 text-lg text-ink-muted">extra saved</span>
+            <span className="pb-1 text-lg text-ink-muted">you save</span>
           </div>
 
           <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
-            <Stat icon={Receipt} label="Final effective bill" value={money(s.final_bill)} testid="result-final-bill" exact={moneyExact(s.final_bill)} />
-            <Stat icon={TrendingUp} label="Total saved vs MRP" value={money(s.total_saving)} testid="result-total-saving" exact={moneyExact(s.total_saving)} />
+            <Stat icon={Receipt} label="Effective price" value={money(s.final_bill)} testid="result-final-bill" exact={moneyExact(s.final_bill)} />
+            <Stat icon={TrendingUp} label="Total off MRP" value={money(s.total_saving)} testid="result-total-saving" exact={moneyExact(s.total_saving)} />
             <Stat icon={Layers} label="Savings boost" value={`${s.total_saving_percent}%`} testid="result-boost" />
           </div>
 
@@ -126,18 +75,36 @@ export function ResultsView({ result }) {
           )}
         </div>
 
-        {/* Route comparison */}
-        <div className="grid gap-4 sm:grid-cols-2">
-          <RouteCard route={result.affiliate} label="Affiliate cashback" />
-          <RouteCard route={result.gift_card} label="Gift card discount" />
-        </div>
-
-        {/* Applicable partners + Yukti-suggested CTA (affiliate & gift card) */}
-        <PartnerSection result={result} side="affiliate" />
-        <PartnerSection result={result} side="gift_card" />
-
-        {/* Yukti Approved receipt */}
+        {/* 2 — Savings Receipt (first meaningful detail after the transition) */}
         {s.extra_saved.rupees > 0 && <ReceiptStamp result={result} />}
+
+        {/* 3 — Recommended saving route + partner CTA */}
+        {s.extra_saved.rupees > 0 && (
+          <div className="space-y-4" data-testid="recommended-route">
+            <div className="surface rounded-2xl p-5">
+              <h4 className="font-display text-xl font-700 text-ink" data-testid="route-headline">
+                Ready to save {money(s.extra_saved)}?
+              </h4>
+              <p className="mt-1 text-sm text-ink-muted">
+                Yukti recommends this saving route. These are independent third-party partners —
+                Yukti doesn&apos;t sell products or issue gift cards, it just finds you the best route.
+              </p>
+              {result.checkout_steps?.length > 0 && (
+                <ol className="mt-4 space-y-3" data-testid="checkout-steps">
+                  {result.checkout_steps.map((step, i) => (
+                    <li key={i} className="flex gap-3 text-sm text-ink-muted">
+                      <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full btn-gold text-xs font-700">{i + 1}</span>
+                      <span>{step}</span>
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </div>
+
+            <PartnerSection result={result} side="gift_card" />
+            <PartnerSection result={result} side="affiliate" />
+          </div>
+        )}
 
         {/* Warnings */}
         {result.warnings?.length > 0 && (
@@ -149,37 +116,6 @@ export function ResultsView({ result }) {
             ))}
           </div>
         )}
-
-        {/* Checkout sequence */}
-        {result.checkout_steps?.length > 0 && (
-          <div className="surface rounded-xl p-5" data-testid="checkout-steps">
-            <h5 className="font-display text-base font-600 text-ink">Best checkout sequence</h5>
-            <ol className="mt-3 space-y-3">
-              {result.checkout_steps.map((step, i) => (
-                <li key={i} className="flex gap-3 text-sm text-ink-muted">
-                  <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full btn-gold text-xs font-700">{i + 1}</span>
-                  <span>{step}</span>
-                </li>
-              ))}
-            </ol>
-            <p className="mt-4 rounded-md bg-muted/50 p-3 text-xs text-ink-muted">
-              Cashback is never guaranteed. Verify retailer terms, tracking exclusions, category
-              classification, payment eligibility and final commission before purchasing.
-            </p>
-          </div>
-        )}
-
-        {/* Stacking info */}
-        <div className="flex flex-wrap items-center gap-2 text-xs text-ink-muted" data-testid="stacking-info">
-          <span className="rounded-full border border-border px-2.5 py-1">Stacking: {stk.policy}</span>
-          <span className="rounded-full border border-border px-2.5 py-1">Split payment: {stk.split_payment_supported}</span>
-          {stk.partial_gift_card && (
-            <span className="rounded-full border border-border px-2.5 py-1">
-              Gift card {money(stk.gift_card_spend)} + other {money(stk.other_payment_spend)}
-            </span>
-          )}
-          <span className="rounded-full border border-border px-2.5 py-1">Rate snapshot: {result.rate_version}</span>
-        </div>
       </div>
 
       <EmotionalPanel status={s.status} />
@@ -203,7 +139,7 @@ function PartnerSection({ result, side }) {
     ? (result.preferred_affiliate_url || preferred.platform_url)
     : preferred.platform_url;
 
-  const label = isAff ? "Affiliate partners" : "Gift card partners";
+  const label = isAff ? "Cashback partner" : "Gift card partner";
   const SectionIcon = isAff ? Percent : Gift;
   const verb = isAff ? "Continue with" : "Buy gift card via";
   const sectionTestId = isAff ? "affiliate-partners" : "giftcard-partners";
@@ -232,7 +168,7 @@ function PartnerSection({ result, side }) {
         <div className="min-w-0">
           <p className="flex items-center gap-1.5 text-sm font-600 text-ink">
             <Star className="h-4 w-4 shrink-0 fill-gold text-gold" />
-            Yukti Suggested: <span className="gold-text">{preferred.platform_name}</span>
+            Yukti recommends: <span className="gold-text">{preferred.platform_name}</span>
           </p>
           <p className="mt-0.5 text-xs text-ink-muted">
             {fmtRate(preferred)} · saves {money(preferred.saving)}
@@ -267,7 +203,7 @@ function PartnerSection({ result, side }) {
           <button onClick={() => setOpen((v) => !v)} data-testid={toggleTestId}
             className="focus-ring mt-3 inline-flex items-center gap-1.5 text-sm text-gold hover:underline">
             <ChevronDown className={`h-4 w-4 transition-transform ${open ? "rotate-180" : ""}`} />
-            {open ? "Hide" : "Show"} all {isAff ? "affiliate" : "gift card"} partners ({eligible.length} eligible)
+            {open ? "Hide" : "Show"} all {isAff ? "cashback" : "gift card"} partners ({eligible.length} eligible)
           </button>
 
           {open && (
@@ -281,10 +217,10 @@ function PartnerSection({ result, side }) {
                     <span className="text-sm font-600 text-ink">{o.platform_name}</span>
                     {o.is_best ? (
                       <span className="inline-flex items-center gap-1 rounded-full bg-gold/15 px-2 py-0.5 text-[10px] text-gold">
-                        <Star className="h-2.5 w-2.5 fill-gold" /> Yukti Suggested
+                        <Star className="h-2.5 w-2.5 fill-gold" /> Yukti recommends
                       </span>
                     ) : o.eligible ? (
-                      <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] uppercase text-ink-muted">Informational</span>
+                      <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] uppercase text-ink-muted">Also available</span>
                     ) : (
                       <span className="text-[10px] text-ink-muted">{o.reasons?.[0] || "Not eligible"}</span>
                     )}
