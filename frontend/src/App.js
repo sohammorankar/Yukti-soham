@@ -7,6 +7,7 @@ import { AuthProvider } from "@/context/AuthContext";
 
 import SiteLayout from "@/components/site/SiteLayout";
 import Home from "@/pages/Home";
+import StorePage from "@/pages/StorePage";
 import { About, Mission, HowItWorks, Privacy, Terms, AffiliateDisclosure, CashbackDisclaimer, CookiePolicy, FAQ } from "@/pages/content";
 import { FeedbackPage } from "@/pages/FeedbackPage";
 import { Brands, Categories, Deals } from "@/pages/discovery";
@@ -36,6 +37,7 @@ export default function App() {
           <Routes>
             <Route element={<SiteLayout />}>
               <Route path="/" element={<Home />} />
+              <Route path="/stores/:slug" element={<StorePage />} />
               <Route path="/deals" element={<Deals />} />
               <Route path="/brands" element={<Brands />} />
               <Route path="/categories" element={<Categories />} />
