@@ -51,7 +51,7 @@ export const CATEGORY_ASSETS = {
 
 // Deal images, keyed by a short token matched against deal text.
 export const DEAL_ASSETS = {
-  amazon: "/assets/deals/boat-rockerz-113.webp",
+  boat: "/assets/deals/boat-rockerz-113.webp",
 };
 
 export const normalizeAssetKey = (value = "") =>
