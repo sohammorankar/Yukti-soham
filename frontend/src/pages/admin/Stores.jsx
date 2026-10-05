@@ -7,7 +7,7 @@ import {
 } from "@/components/ui/dialog";
 import { useMeta } from "@/lib/useMeta";
 
-const empty = { name: "", stacking: "unsure", split_payment_supported: "unsure", stacking_note: "" };
+const empty = { name: "", stacking: "unsure", split_payment_supported: "unsure", stacking_note: "", slug: "", display_rank: "", logo_url: "", image_url: "", description: "", homepage_visible: true, featured: false };
 
 export default function Stores() {
   useMeta("Stores · Console", "");
@@ -30,7 +30,7 @@ export default function Stores() {
   };
   const archive = async (id) => { await api.delete(`/admin/stores/${id}`); toast.success("Archived"); load(); };
   const restore = async (id) => { await api.post(`/admin/stores/${id}/restore`); toast.success("Restored"); load(); };
-  const edit = (r) => { setForm({ name: r.name, stacking: r.stacking, split_payment_supported: r.split_payment_supported, stacking_note: r.stacking_note || "" }); setEditId(r.id); setOpen(true); };
+  const edit = (r) => { setForm({ name: r.name, stacking: r.stacking, split_payment_supported: r.split_payment_supported, stacking_note: r.stacking_note || "", slug: r.slug || "", display_rank: r.display_rank ?? "", logo_url: r.logo_url || "", image_url: r.image_url || "", description: r.description || "", homepage_visible: r.homepage_visible !== false, featured: !!r.featured }); setEditId(r.id); setOpen(true); };
 
   return (
     <div className="mx-auto max-w-4xl">
@@ -62,6 +62,35 @@ export default function Stores() {
               <Field label="Shopper-facing note (optional)">
                 <textarea value={form.stacking_note} onChange={(e) => setForm({ ...form, stacking_note: e.target.value })} rows={2} className="in" style={{ height: "auto", padding: ".5rem .75rem" }} />
               </Field>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Slug (URL-safe)" help="Auto-generated from name if left blank">
+                  <input value={form.slug} onChange={(e) => setForm({ ...form, slug: e.target.value })} data-testid="store-slug" placeholder="amazon" className="in" />
+                </Field>
+                <Field label="Display rank" help="Lower shows first (homepage order)">
+                  <input type="number" value={form.display_rank} onChange={(e) => setForm({ ...form, display_rank: e.target.value })} data-testid="store-rank" className="in" />
+                </Field>
+              </div>
+              <Field label="Logo URL (optional)">
+                <input value={form.logo_url} onChange={(e) => setForm({ ...form, logo_url: e.target.value })} data-testid="store-logo-url" placeholder="https://…" className="in" />
+              </Field>
+              <Field label="Image URL (optional)">
+                <input value={form.image_url} onChange={(e) => setForm({ ...form, image_url: e.target.value })} data-testid="store-image-url" placeholder="https://…" className="in" />
+              </Field>
+              <Field label="Description (optional)">
+                <textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={2} data-testid="store-description" className="in" style={{ height: "auto", padding: ".5rem .75rem" }} />
+              </Field>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Homepage visible">
+                  <select value={form.homepage_visible ? "yes" : "no"} onChange={(e) => setForm({ ...form, homepage_visible: e.target.value === "yes" })} data-testid="store-homepage-visible" className="in">
+                    <option value="yes">yes</option><option value="no">no</option>
+                  </select>
+                </Field>
+                <Field label="Featured">
+                  <select value={form.featured ? "yes" : "no"} onChange={(e) => setForm({ ...form, featured: e.target.value === "yes" })} data-testid="store-featured" className="in">
+                    <option value="no">no</option><option value="yes">yes</option>
+                  </select>
+                </Field>
+              </div>
             </div>
             <DialogFooter>
               <button onClick={save} data-testid="store-save" className="btn-gold rounded-full px-5 py-2 text-sm font-700">Save</button>

@@ -64,9 +64,17 @@ export function ResultsView({ result }) {
 
           <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
             <Stat icon={Receipt} label="Effective price" value={money(s.final_bill)} testid="result-final-bill" exact={moneyExact(s.final_bill)} />
-            <Stat icon={TrendingUp} label="Total off MRP" value={money(s.total_saving)} testid="result-total-saving" exact={moneyExact(s.total_saving)} />
-            <Stat icon={Layers} label="Savings boost" value={`${s.total_saving_percent}%`} testid="result-boost" />
+            {s.mrp_provided && (
+              <Stat icon={TrendingUp} label="Total off MRP" value={money(s.total_saving)} testid="result-total-saving" exact={moneyExact(s.total_saving)} />
+            )}
+            <Stat icon={Layers} label="Savings boost" value={`${s.boost_percent}%`} testid="result-boost" />
           </div>
+
+          {!s.mrp_provided && (
+            <p className="mt-3 text-xs text-ink-muted" data-testid="mrp-missing-note">
+              MRP was not provided — MRP-based savings were not calculated.
+            </p>
+          )}
 
           {savingsConclusion(result) && (
             <p className="mt-5 rounded-lg border border-savings/30 bg-savings/5 p-3 text-sm text-ink" data-testid="savings-conclusion">

@@ -19,7 +19,7 @@ from fastapi import FastAPI, APIRouter, Request, Response, HTTPException, Depend
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo.errors import DuplicateKeyError
-from pydantic import BaseModel, Field, EmailStr, field_validator
+from pydantic import BaseModel, Field, EmailStr, field_validator, model_validator
 from typing import List, Optional, Literal
 
 from money import D, q, round_rupee, money_out
@@ -160,6 +160,27 @@ def clean(doc: dict) -> dict:
 def _norm_slug(v: str) -> str:
     """Normalize a partner/store name to a comparable slug (alnum, lowercase)."""
     return re.sub(r"[^a-z0-9]", "", (v or "").lower())
+
+
+def _slugify(v: str) -> str:
+    """URL-safe, lowercase, hyphenated store slug from a name. Stable once stored."""
+    s = re.sub(r"[^a-z0-9]+", "-", (v or "").lower()).strip("-")
+    return s or "store"
+
+
+async def _unique_store_slug(base: str, exclude_id: str = None) -> str:
+    """Return a unique store slug derived from base, suffixing -2, -3, … on collision."""
+    base = _slugify(base)
+    slug = base
+    n = 2
+    while True:
+        query = {"slug": slug}
+        if exclude_id:
+            query["id"] = {"$ne": exclude_id}
+        if not await db.stores.find_one(query, {"_id": 0, "id": 1}):
+            return slug
+        slug = f"{base}-{n}"
+        n += 1
 
 
 _UNSAFE_URL_SCHEMES = ("javascript:", "data:", "file:", "vbscript:", "about:", "blob:", "ftp:")
@@ -308,9 +329,9 @@ class CardBody(BaseModel):
 class CalcBody(BaseModel):
     store_id: Optional[str] = None
     store_name: Optional[str] = None
-    category: str
+    category: Optional[str] = None
     customer_type: Literal["new", "existing", "both"] = "existing"
-    mrp: float
+    mrp: Optional[float] = None
     price: float
     # Optional: one of the authenticated shopper's own saved card profiles.
     card_id: Optional[str] = None
@@ -318,9 +339,16 @@ class CalcBody(BaseModel):
     @field_validator("mrp", "price")
     @classmethod
     def non_negative(cls, v):
-        if v < 0:
+        if v is not None and v < 0:
             raise ValueError("must be non-negative")
         return v
+
+    @model_validator(mode="after")
+    def mrp_not_below_price(self):
+        # MRP is optional; only reject when it is provided AND lower than price.
+        if self.mrp is not None and self.price > self.mrp:
+            raise ValueError("Selling price cannot exceed MRP")
+        return self
 
 
 class DetectBody(BaseModel):
@@ -366,6 +394,10 @@ async def startup():
     for coll in ["platforms", "stores", "categories", "rate_cards"]:
         await db[coll].create_index("id", unique=True)
     await db.store_domains.create_index("domain_or_alias", unique=True)
+    # Milestone 2: store architecture indexes (slug/rank/curation)
+    await db.stores.create_index("slug", unique=True, sparse=True)
+    await db.stores.create_index("display_rank")
+    await db.stores.create_index([("active", 1), ("homepage_visible", 1)])
 
     created = await seed_all(db)
     if created:
@@ -376,6 +408,37 @@ async def startup():
         await db.stores.update_one(
             {"name": name, "store_url": {"$in": [None, ""]}},
             {"$set": {"store_url": url}})
+
+    # Milestone 2: backfill store architecture fields (idempotent, non-destructive).
+    # Deterministic initial display_rank follows the existing public order (name ASC)
+    # so current ordering is preserved; business curation happens later via admin.
+    existing_slugs = {
+        s["slug"] for s in await db.stores.find(
+            {"slug": {"$nin": [None, ""]}}, {"_id": 0, "slug": 1}).to_list(1000)
+    }
+    rank = 0
+    for s in await db.stores.find({}, {"_id": 0}).sort("name", 1).to_list(1000):
+        rank += 1
+        updates = {}
+        if not s.get("slug"):
+            base = _slugify(s.get("name"))
+            slug = base
+            n = 2
+            while slug in existing_slugs:
+                slug = f"{base}-{n}"
+                n += 1
+            existing_slugs.add(slug)
+            updates["slug"] = slug
+        if s.get("display_rank") is None:
+            updates["display_rank"] = rank
+        for field, default in (("logo_url", None), ("image_url", None),
+                               ("description", None), ("featured", False)):
+            if field not in s:
+                updates[field] = default
+        if "homepage_visible" not in s:
+            updates["homepage_visible"] = bool(s.get("active", True))
+        if updates:
+            await db.stores.update_one({"id": s["id"]}, {"$set": updates})
 
     # Owner bootstrap via allowlist (open admin registration disabled)
     allowlist = [e.strip().lower() for e in os.environ.get("ADMIN_ALLOWLIST", "").split(",") if e.strip()]
@@ -728,10 +791,66 @@ def public_filter():
     return {"active": True, "archived_at": None}
 
 
+STORE_PUBLIC_DETAIL_FIELDS = {"_id": 0, "id": 1, "name": 1, "slug": 1, "store_url": 1,
+                              "logo_url": 1, "image_url": 1, "description": 1,
+                              "display_rank": 1, "featured": 1}
+
+
+async def _store_rule_flags():
+    """Return (category_flags, customer_type_flags) maps keyed by store_id.
+
+    Both are derived ONLY from ACTIVE + PUBLISHED + AFFILIATE rate cards (gift-card
+    rules are intentionally excluded, and store names are never hard-coded):
+      - category rules: an affiliate rule whose category is a real category (not the
+        wildcard "All") → the payout depends on product category.
+      - customer-type rules: an affiliate rule whose customer_type is specific
+        (new/existing, i.e. not "both") → the payout depends on customer type.
+    """
+    cat_flags, ctype_flags = {}, {}
+    cur = db.rate_cards.find(
+        {"active": True, "status": "published", "platform_kind": "affiliate"},
+        {"_id": 0, "store_id": 1, "category_name": 1, "customer_type": 1})
+    async for r in cur:
+        sid_ = r.get("store_id")
+        if not sid_:
+            continue
+        if (r.get("category_name") or "").strip().lower() != "all":
+            cat_flags[sid_] = True
+        if (r.get("customer_type") or "both").strip().lower() != "both":
+            ctype_flags[sid_] = True
+    return cat_flags, ctype_flags
+
+
 @api.get("/public/stores")
-async def public_stores():
-    stores = await db.stores.find(public_filter(), {"_id": 0}).sort("name", 1).to_list(500)
+async def public_stores(homepage: bool = False, limit: int = 0):
+    """All active public stores (default), ordered by admin display_rank then name.
+    Backward compatible: GET /api/public/stores still returns the full active list.
+    Optional homepage=true restricts to curated (homepage_visible) stores and limit
+    caps the count for homepage widgets."""
+    filt = public_filter()
+    if homepage:
+        filt["homepage_visible"] = True
+    stores = await db.stores.find(filt, {"_id": 0}).sort(
+        [("display_rank", 1), ("name", 1)]).to_list(500)
+    if limit and limit > 0:
+        stores = stores[:limit]
+    cat_flags, ctype_flags = await _store_rule_flags()
+    for s in stores:
+        s["has_category_rules"] = bool(cat_flags.get(s["id"]))
+        s["has_customer_type_rules"] = bool(ctype_flags.get(s["id"]))
     return stores
+
+
+@api.get("/public/stores/{slug}")
+async def public_store_detail(slug: str):
+    """Public store lookup by slug (foundation for future store pages). Exposes only
+    public fields; 404 when the slug does not exist or the store is not publicly active."""
+    store = await db.stores.find_one(
+        {"slug": (slug or "").lower(), "active": True, "archived_at": None},
+        STORE_PUBLIC_DETAIL_FIELDS)
+    if not store:
+        raise HTTPException(status_code=404, detail="Store not found")
+    return store
 
 
 @api.get("/public/categories")
@@ -1133,7 +1252,7 @@ async def delete_affiliate_destination(mid: str, request: Request, user=Depends(
 # ---- Stores + settings ----
 @api.get("/admin/stores")
 async def admin_stores(user=Depends(require_any_role)):
-    return await db.stores.find({}, {"_id": 0}).sort("name", 1).to_list(500)
+    return await db.stores.find({}, {"_id": 0}).sort([("display_rank", 1), ("name", 1)]).to_list(500)
 
 
 @api.post("/admin/stores")
@@ -1143,11 +1262,25 @@ async def create_store(body: dict, request: Request, user=Depends(require_write)
         raise HTTPException(400, "Name required")
     if await db.stores.find_one({"name": re.compile(f"^{re.escape(name)}$", re.I)}):
         raise HTTPException(409, "Store name already exists")
+    slug = await _unique_store_slug(body.get("slug") or name)
+    if body.get("display_rank") not in (None, ""):
+        display_rank = int(body["display_rank"])
+    else:
+        last = await db.stores.find_one({}, {"_id": 0, "display_rank": 1},
+                                        sort=[("display_rank", -1)])
+        display_rank = int((last or {}).get("display_rank") or 0) + 1
     doc = {"id": str(uuid.uuid4()), "name": name, "active": True,
+           "slug": slug,
            "stacking": body.get("stacking", "unsure"),
            "stacking_note": body.get("stacking_note"),
            "store_url": body.get("store_url"),
            "split_payment_supported": body.get("split_payment_supported", "unsure"),
+           "display_rank": display_rank,
+           "logo_url": body.get("logo_url"),
+           "image_url": body.get("image_url"),
+           "description": body.get("description"),
+           "homepage_visible": bool(body.get("homepage_visible", True)),
+           "featured": bool(body.get("featured", False)),
            "archived_at": None, "created_at": now_iso(), "updated_at": now_iso()}
     await db.stores.insert_one(dict(doc))
     await audit(user, "create", "store", doc["id"], None, doc, request)
@@ -1160,7 +1293,19 @@ async def update_store(sid_: str, body: dict, request: Request, user=Depends(req
     if not before:
         raise HTTPException(404, "Not found")
     upd = {k: body[k] for k in ("name", "active", "stacking", "stacking_note",
-                                "store_url", "split_payment_supported") if k in body}
+                                "store_url", "split_payment_supported",
+                                "display_rank", "logo_url", "image_url",
+                                "description", "homepage_visible", "featured") if k in body}
+    if body.get("slug"):
+        upd["slug"] = await _unique_store_slug(body["slug"], exclude_id=sid_)
+    if "display_rank" in upd:
+        if upd["display_rank"] in (None, ""):
+            del upd["display_rank"]
+        else:
+            upd["display_rank"] = int(upd["display_rank"])
+    for b in ("homepage_visible", "featured"):
+        if b in upd:
+            upd[b] = bool(upd[b])
     upd["updated_at"] = now_iso()
     await db.stores.update_one({"id": sid_}, {"$set": upd})
     after = await db.stores.find_one({"id": sid_}, {"_id": 0})

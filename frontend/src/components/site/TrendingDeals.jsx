@@ -3,25 +3,7 @@ import { TrendingUp, Layers, ArrowRight, Clock3 } from "lucide-react";
 import { api } from "@/lib/api";
 import { money } from "@/lib/format";
 import { Link } from "react-router-dom";
-
-const DEAL_ASSETS = {
-  boat: "/assets/deals/boat-rockerz-113.webp",
-};
-
-const normalizeKey = (value = "") =>
-  value.toLowerCase().replace(/[^a-z0-9]+/g, "").trim();
-
-const getDealImage = (deal) => {
-  const haystack = normalizeKey(
-    `${deal?.title || ""} ${deal?.product_name || ""} ${deal?.name || ""} ${deal?.store || ""}`
-  );
-
-  if (haystack.includes("boat") || haystack.includes("rockerz113")) {
-    return DEAL_ASSETS.boat;
-  }
-
-  return deal?.image_url || deal?.image || null;
-};
+import { getDealImage } from "@/lib/assets";
 
 const getSecondsUntilMidnight = () => {
   const now = new Date();

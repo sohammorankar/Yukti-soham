@@ -29,6 +29,11 @@ export function ReceiptStamp({ result }) {
           <div className="my-2 border-t border-dashed border-[#c9c0ac]" />
           <Row k="You save" v={money(s.extra_saved)} strong />
           <Row k="Effective price" v={money(s.final_bill)} strong />
+          {!s.mrp_provided && (
+            <div className="mt-1 text-center text-[10px] text-[#7a7263]" data-testid="receipt-mrp-note">
+              MRP not provided · MRP-based savings not calculated
+            </div>
+          )}
           <div className="mt-3 border-t border-dashed border-[#c9c0ac] pt-2 text-center text-[10px] text-[#7a7263]">
             Estimated savings · verify retailer terms before purchase
           </div>
