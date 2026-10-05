@@ -166,7 +166,7 @@ export default function Home() {
 
       {/* Influencer offers */}
       <section className="mx-auto max-w-7xl px-4 sm:px-6" data-testid="influencer-section">
-        <SectionHead icon={Users} eyebrow="Community" title="Influencer Offers"
+        <SectionHead icon={Users} eyebrow="Community" title="Influencer Offers — Coming Soon"
           sub="Curated creator picks — each still runs through the same transparent engine." />
         <div className="grid gap-4 sm:grid-cols-3">
           {[

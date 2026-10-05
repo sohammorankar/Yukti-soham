@@ -26,7 +26,7 @@ export function SavingsEngine({ onResult, initial }) {
   const [cardId, setCardId] = useState(""); // "" = no card selected (optional)
   const [url, setUrl] = useState("");
   const [storeId, setStoreId] = useState("");
-  const [category, setCategory] = useState("All");
+  const [category, setCategory] = useState("");
   const [customerType, setCustomerType] = useState("existing"); // default Existing
   const [mrp, setMrp] = useState("");
   const [price, setPrice] = useState("");
@@ -66,8 +66,24 @@ export function SavingsEngine({ onResult, initial }) {
   }, [initial]);
 
   const storeOptions = useMemo(() => stores.map((s) => ({ value: s.id, label: s.name })), [stores]);
-  const catOptions = useMemo(() => categories.map((c) => ({ value: c.name, label: c.name })), [categories]);
+  const catOptions = useMemo(() => categories
+    .filter((c) => (c.name || "").trim().toLowerCase() !== "all")
+    .map((c) => ({ value: c.name, label: c.name })), [categories]);
   const selectedStore = stores.find((s) => s.id === storeId);
+
+  // Category / Customer Type are shown ONLY when the selected store's affiliate
+  // payout genuinely depends on that dimension (flags come from the backend,
+  // derived from active+published affiliate rules — never hard-coded by name).
+  const showCategory = !!selectedStore?.has_category_rules;
+  const showCustomerType = !!selectedStore?.has_customer_type_rules;
+
+  // When the store changes (manually or via URL detection), drop any stale value
+  // for a dimension that no longer applies so it is never sent into the calc.
+  useEffect(() => {
+    if (!selectedStore) return;
+    if (!selectedStore.has_category_rules) setCategory("");
+    if (!selectedStore.has_customer_type_rules) setCustomerType("existing");
+  }, [storeId, stores]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const isAmazonFlipkart = amazonFlipkart ||
     ["amazon", "flipkart"].includes((selectedStore?.name || "").toLowerCase());
@@ -135,13 +151,17 @@ export function SavingsEngine({ onResult, initial }) {
 
   const calculate = async () => {
     if (!selectedStore) { toast.error("Please choose a store"); return; }
-    if (!mrp || !price) { toast.error("Enter MRP and selling price"); return; }
-    if (Number(price) > Number(mrp)) { toast.error("Selling price cannot exceed MRP"); return; }
+    if (!price) { toast.error("Enter the selling price"); return; }
+    if (mrp && Number(price) > Number(mrp)) { toast.error("Selling price cannot exceed MRP"); return; }
+    if (showCategory && !category) { toast.error("Please choose a category"); return; }
     setLoading(true);
     try {
       const { data } = await api.post("/calculate", {
-        store_id: storeId, store_name: selectedStore?.name, category,
-        customer_type: customerType, mrp: Number(mrp), price: Number(price),
+        store_id: storeId, store_name: selectedStore?.name,
+        price: Number(price),
+        ...(showCategory && category ? { category } : {}),
+        ...(showCustomerType ? { customer_type: customerType } : {}),
+        ...(mrp ? { mrp: Number(mrp) } : {}),
         ...(cardId ? { card_id: cardId } : {}),
       });
       setLastResult(data);
@@ -186,7 +206,7 @@ export function SavingsEngine({ onResult, initial }) {
 
         <div className="mt-5 grid gap-4 sm:grid-cols-2">
           {/* Store */}
-          <div>
+          <div className={showCategory ? "" : "sm:col-span-2"}>
             <label className="mb-1.5 flex items-center gap-1.5 text-xs font-600 uppercase tracking-wide text-ink-muted">
               <Store className="h-3.5 w-3.5" /> Store
             </label>
@@ -194,28 +214,30 @@ export function SavingsEngine({ onResult, initial }) {
               placeholder="Choose store" testid="select-store" ariaLabel="Select store" />
           </div>
 
-          {/* Category */}
-          <div>
-            <label className="mb-1.5 flex items-center gap-1.5 text-xs font-600 uppercase tracking-wide text-ink-muted">
-              <Tags className="h-3.5 w-3.5" /> Category
-              {detection && (
-                detection.band === "high" ? (
-                  <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-savings/15 px-2 py-0.5 text-[10px] normal-case text-savings" data-testid="cat-detected">
-                    <BadgeCheck className="h-3 w-3" /> Detected · {Math.round(detection.confidence * 100)}%
-                  </span>
-                ) : (
-                  <span className="ml-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] normal-case text-amber-400" data-testid="cat-verify">
-                    Best match — please verify
-                  </span>
-                )
+          {/* Category — shown only when the store's affiliate payout depends on category */}
+          {showCategory && (
+            <div data-testid="category-field">
+              <label className="mb-1.5 flex items-center gap-1.5 text-xs font-600 uppercase tracking-wide text-ink-muted">
+                <Tags className="h-3.5 w-3.5" /> Category
+                {detection && (
+                  detection.band === "high" ? (
+                    <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-savings/15 px-2 py-0.5 text-[10px] normal-case text-savings" data-testid="cat-detected">
+                      <BadgeCheck className="h-3 w-3" /> Detected · {Math.round(detection.confidence * 100)}%
+                    </span>
+                  ) : (
+                    <span className="ml-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] normal-case text-amber-400" data-testid="cat-verify">
+                      Best match — please verify
+                    </span>
+                  )
+                )}
+              </label>
+              <Combobox options={catOptions} value={category} onChange={onCategoryChange}
+                placeholder="Choose category" testid="select-category" ariaLabel="Select category" />
+              {detection?.explanation && (
+                <p className="mt-1 text-[11px] text-ink-muted">{detection.explanation}</p>
               )}
-            </label>
-            <Combobox options={catOptions} value={category} onChange={onCategoryChange}
-              placeholder="Choose category" testid="select-category" ariaLabel="Select category" />
-            {detection?.explanation && (
-              <p className="mt-1 text-[11px] text-ink-muted">{detection.explanation}</p>
-            )}
-          </div>
+            </div>
+          )}
         </div>
 
         {/* Optional payment card — logged-in shoppers only; never required */}
@@ -264,44 +286,48 @@ export function SavingsEngine({ onResult, initial }) {
           </div>
         )}
 
-        {/* Customer type + MRP + price */}
+        {/* Customer type (shown only when the store's affiliate payout depends on it) + MRP + price */}
         <div className="mt-5 grid gap-4 sm:grid-cols-2">
-          <div>
-            <div className="mb-1.5 flex items-center gap-1.5">
-              <span className="text-xs font-600 uppercase tracking-wide text-ink-muted">Customer type</span>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button type="button" data-testid="customer-type-info" aria-label="About customer type"
-                    className="focus-ring grid h-4 w-4 place-items-center rounded-full text-ink-muted hover:text-gold">
-                    <HelpCircle className="h-3.5 w-3.5" />
+          {showCustomerType && (
+            <div data-testid="customer-type-field">
+              <div className="mb-1.5 flex items-center gap-1.5">
+                <span className="text-xs font-600 uppercase tracking-wide text-ink-muted">Customer type</span>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button type="button" data-testid="customer-type-info" aria-label="About customer type"
+                      className="focus-ring grid h-4 w-4 place-items-center rounded-full text-ink-muted hover:text-gold">
+                      <HelpCircle className="h-3.5 w-3.5" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-xs text-xs">
+                    Choose New User only if this is your first eligible transaction with this store or
+                    platform. Otherwise, keep Existing User selected.
+                  </TooltipContent>
+                </Tooltip>
+              </div>
+              <div className="inline-flex w-full rounded-md border border-border p-1" role="tablist" data-testid="customer-type-toggle">
+                {[["existing", "Existing User"], ["new", "New User"]].map(([val, label]) => (
+                  <button
+                    key={val} role="tab" aria-selected={customerType === val}
+                    onClick={() => setCustomerType(val)}
+                    data-testid={`customer-type-${val}`}
+                    className={`flex-1 rounded px-3 py-2 text-sm transition-colors ${
+                      customerType === val ? "btn-gold font-600" : "text-ink-muted hover:text-ink"
+                    }`}
+                  >
+                    {label}
                   </button>
-                </TooltipTrigger>
-                <TooltipContent className="max-w-xs text-xs">
-                  Choose New User only if this is your first eligible transaction with this store or
-                  platform. Otherwise, keep Existing User selected.
-                </TooltipContent>
-              </Tooltip>
+                ))}
+              </div>
             </div>
-            <div className="inline-flex w-full rounded-md border border-border p-1" role="tablist" data-testid="customer-type-toggle">
-              {[["existing", "Existing User"], ["new", "New User"]].map(([val, label]) => (
-                <button
-                  key={val} role="tab" aria-selected={customerType === val}
-                  onClick={() => setCustomerType(val)}
-                  data-testid={`customer-type-${val}`}
-                  className={`flex-1 rounded px-3 py-2 text-sm transition-colors ${
-                    customerType === val ? "btn-gold font-600" : "text-ink-muted hover:text-ink"
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
+          )}
+          <div className={`grid grid-cols-2 gap-4 ${showCustomerType ? "" : "sm:col-span-2"}`}>
             <div>
-              <label className="mb-1.5 block text-xs font-600 uppercase tracking-wide text-ink-muted">MRP (₹)</label>
+              <label className="mb-1.5 block text-xs font-600 uppercase tracking-wide text-ink-muted">
+                MRP (₹) <span className="font-400 normal-case tracking-normal">· optional</span>
+              </label>
               <input type="number" inputMode="decimal" value={mrp} onChange={(e) => setMrp(e.target.value)}
-                data-testid="input-mrp" placeholder="1599"
+                data-testid="input-mrp" placeholder="Optional"
                 className="focus-ring h-11 w-full rounded-md border border-border bg-input px-3 text-sm text-foreground" />
             </div>
             <div>
@@ -320,7 +346,7 @@ export function SavingsEngine({ onResult, initial }) {
           onClick={calculate} disabled={loading} data-testid="btn-calculate"
           className="btn-gold focus-ring mt-4 flex w-full items-center justify-center gap-2 rounded-full py-3.5 text-base font-700 transition-transform active:scale-[0.99] disabled:opacity-60"
         >
-          <Calculator className="h-5 w-5" /> {loading ? "Calculating…" : "Calculate My Stack"}
+          <Calculator className="h-5 w-5" /> {loading ? "Calculating…" : "Find Best Savings Stack"}
         </button>
       </div>
     </TooltipProvider>
@@ -328,13 +354,14 @@ export function SavingsEngine({ onResult, initial }) {
 }
 
 function MoneyMeter({ mrp, price, store, category, customerType, lastResult }) {
-  const hasInputs = mrp && price && Number(mrp) > 0 && Number(price) > 0 && Number(price) <= Number(mrp);
+  void category; void customerType;
+  const hasInputs = price && Number(price) > 0 && (!mrp || Number(price) <= Number(mrp));
+  const mrpMatches = lastResult && ((!mrp && lastResult.inputs.mrp == null) ||
+    (mrp && lastResult.inputs.mrp && Number(lastResult.inputs.mrp.exact) === Number(mrp)));
   const matches = lastResult &&
     lastResult.inputs.store === store &&
-    lastResult.inputs.category === category &&
-    lastResult.inputs.customer_type === customerType &&
     Number(lastResult.inputs.price.exact) === Number(price) &&
-    Number(lastResult.inputs.mrp.exact) === Number(mrp);
+    mrpMatches;
   const happy = matches && lastResult.summary.extra_saved.rupees > 0;
 
   let state = "idle";

@@ -175,7 +175,8 @@ def calculate_stack(store, product_category, customer_type, mrp, price,
     other rates (and the no-card case) behave exactly as before.
     """
     price = D(price)
-    mrp = D(mrp)
+    mrp_provided = mrp is not None and str(mrp) != ""
+    mrp = D(mrp) if mrp_provided else None
     customer_type = (customer_type or "existing").lower()
 
     aff_winner, aff_eval = best_rule_for_side(
@@ -212,9 +213,9 @@ def calculate_stack(store, product_category, customer_type, mrp, price,
         extra_saved = max(cashback_saving, giftcard_saving)
 
     final_bill = max(ZERO, price - extra_saved)
-    retail_saving = max(ZERO, mrp - price)
+    retail_saving = (max(ZERO, mrp - price) if mrp_provided else ZERO)
     total_saving = retail_saving + extra_saved
-    total_saving_percent = (total_saving / mrp * Decimal("100")) if mrp > 0 else ZERO
+    total_saving_percent = (total_saving / mrp * Decimal("100")) if (mrp_provided and mrp > 0) else ZERO
     boost_percent = (extra_saved / price * Decimal("100")) if price > 0 else ZERO
 
     # Determine which route was applied when not stacking
@@ -324,7 +325,7 @@ def calculate_stack(store, product_category, customer_type, mrp, price,
                 "card_network": card.get("card_network"),
                 "card_name": card.get("card_name"),
             } if card else None),
-            "mrp": money_out(mrp),
+            "mrp": money_out(mrp) if mrp_provided else None,
             "price": money_out(price),
         },
         "summary": {
@@ -334,6 +335,7 @@ def calculate_stack(store, product_category, customer_type, mrp, price,
             "total_saving": money_out(total_saving),
             "total_saving_percent": round(float(total_saving_percent), 1),
             "boost_percent": round(float(boost_percent), 1),
+            "mrp_provided": mrp_provided,
             "status": status,
             "status_label": status_label,
         },

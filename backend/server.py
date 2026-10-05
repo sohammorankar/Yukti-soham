@@ -19,7 +19,7 @@ from fastapi import FastAPI, APIRouter, Request, Response, HTTPException, Depend
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo.errors import DuplicateKeyError
-from pydantic import BaseModel, Field, EmailStr, field_validator
+from pydantic import BaseModel, Field, EmailStr, field_validator, model_validator
 from typing import List, Optional, Literal
 
 from money import D, q, round_rupee, money_out
@@ -329,9 +329,9 @@ class CardBody(BaseModel):
 class CalcBody(BaseModel):
     store_id: Optional[str] = None
     store_name: Optional[str] = None
-    category: str
+    category: Optional[str] = None
     customer_type: Literal["new", "existing", "both"] = "existing"
-    mrp: float
+    mrp: Optional[float] = None
     price: float
     # Optional: one of the authenticated shopper's own saved card profiles.
     card_id: Optional[str] = None
@@ -339,9 +339,16 @@ class CalcBody(BaseModel):
     @field_validator("mrp", "price")
     @classmethod
     def non_negative(cls, v):
-        if v < 0:
+        if v is not None and v < 0:
             raise ValueError("must be non-negative")
         return v
+
+    @model_validator(mode="after")
+    def mrp_not_below_price(self):
+        # MRP is optional; only reject when it is provided AND lower than price.
+        if self.mrp is not None and self.price > self.mrp:
+            raise ValueError("Selling price cannot exceed MRP")
+        return self
 
 
 class DetectBody(BaseModel):
@@ -789,6 +796,31 @@ STORE_PUBLIC_DETAIL_FIELDS = {"_id": 0, "id": 1, "name": 1, "slug": 1, "store_ur
                               "display_rank": 1, "featured": 1}
 
 
+async def _store_rule_flags():
+    """Return (category_flags, customer_type_flags) maps keyed by store_id.
+
+    Both are derived ONLY from ACTIVE + PUBLISHED + AFFILIATE rate cards (gift-card
+    rules are intentionally excluded, and store names are never hard-coded):
+      - category rules: an affiliate rule whose category is a real category (not the
+        wildcard "All") → the payout depends on product category.
+      - customer-type rules: an affiliate rule whose customer_type is specific
+        (new/existing, i.e. not "both") → the payout depends on customer type.
+    """
+    cat_flags, ctype_flags = {}, {}
+    cur = db.rate_cards.find(
+        {"active": True, "status": "published", "platform_kind": "affiliate"},
+        {"_id": 0, "store_id": 1, "category_name": 1, "customer_type": 1})
+    async for r in cur:
+        sid_ = r.get("store_id")
+        if not sid_:
+            continue
+        if (r.get("category_name") or "").strip().lower() != "all":
+            cat_flags[sid_] = True
+        if (r.get("customer_type") or "both").strip().lower() != "both":
+            ctype_flags[sid_] = True
+    return cat_flags, ctype_flags
+
+
 @api.get("/public/stores")
 async def public_stores(homepage: bool = False, limit: int = 0):
     """All active public stores (default), ordered by admin display_rank then name.
@@ -802,6 +834,10 @@ async def public_stores(homepage: bool = False, limit: int = 0):
         [("display_rank", 1), ("name", 1)]).to_list(500)
     if limit and limit > 0:
         stores = stores[:limit]
+    cat_flags, ctype_flags = await _store_rule_flags()
+    for s in stores:
+        s["has_category_rules"] = bool(cat_flags.get(s["id"]))
+        s["has_customer_type_rules"] = bool(ctype_flags.get(s["id"]))
     return stores
 
 
