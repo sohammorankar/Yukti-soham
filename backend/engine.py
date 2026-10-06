@@ -4,8 +4,11 @@ Pure functions operating on plain dicts so they are trivially unit-testable.
 All money math uses Decimal via money.py.
 """
 import re
+import math
+import heapq
+from urllib.parse import unquote, urlsplit
 from datetime import datetime, timezone, date
-from decimal import Decimal
+from decimal import Decimal, ROUND_FLOOR
 from money import D, q, round_rupee, money_out, ZERO
 
 
@@ -119,6 +122,9 @@ def apply_rate(rate, price):
         amount = applied_to * D(rate.get("value")) / Decimal("100")
     else:  # flat_amount
         amount = D(rate.get("value"))
+    payout_cap = rate.get("cashback_cap_amount")
+    if payout_cap not in (None, ""):
+        amount = min(amount, D(payout_cap))
     return q(amount), q(applied_to)
 
 
@@ -128,30 +134,97 @@ def category_matches(rate_category, product_category):
     return rc == "all" or rc == pc
 
 
+def product_matches(phrase, product_url):
+    """Only a pasted product URL can verify an admin-configured product phrase."""
+    if not phrase or not product_url:
+        return False
+    try:
+        parsed = urlsplit(product_url)
+        if parsed.scheme not in ("http", "https") or not parsed.hostname:
+            return False
+        text = unquote(parsed.path + " " + parsed.query)
+        normalized_url = " " + re.sub(r"[^a-z0-9]+", " ", text.lower()).strip() + " "
+        normalized_phrase = " " + re.sub(r"[^a-z0-9]+", " ", phrase.lower()).strip() + " "
+        return len(normalized_phrase.strip()) >= 3 and normalized_phrase in normalized_url
+    except ValueError:
+        return False
+
+
+def best_gift_card_spend(price, denominations):
+    """Largest purchasable sum <= price from verified denominations (repeatable cards)."""
+    target_cents = int((D(price) * 100).to_integral_value(rounding=ROUND_FLOOR))
+    coins = sorted({int((D(amount) * 100).to_integral_value()) for amount in denominations
+                    if D(amount) > 0 and D(amount) <= D(price)})
+    if not coins or target_cents <= 0:
+        return ZERO
+    scale = math.gcd(*coins)
+    coins = [coin // scale for coin in coins]
+    target = target_cents // scale
+    minimum = coins[0]
+    if minimum <= 50000:
+        # Dijkstra by residue: once the smallest amount for a remainder is
+        # reachable, any larger amount in that residue can add the minimum coin.
+        distance = [None] * minimum
+        distance[0] = 0
+        queue = [(0, 0)]
+        while queue:
+            value, residue = heapq.heappop(queue)
+            if value != distance[residue]:
+                continue
+            for coin in coins:
+                new_value = value + coin
+                remainder = new_value % minimum
+                if new_value <= target and (distance[remainder] is None or new_value < distance[remainder]):
+                    distance[remainder] = new_value
+                    heapq.heappush(queue, (new_value, remainder))
+        best = max((target - (target - value) % minimum
+                    for value in distance if value is not None and value <= target), default=0)
+    else:
+        # Very large, unusual denominations: enumerate attainable amounts
+        # rather than allocating an enormous residue table.
+        reachable = {0}
+        queue = [0]
+        for value in queue:
+            for coin in coins:
+                candidate = value + coin
+                if candidate <= target and candidate not in reachable:
+                    reachable.add(candidate)
+                    queue.append(candidate)
+            if target in reachable:
+                break
+        best = max(reachable)
+    return Decimal(best * scale) / Decimal("100")
+
+
 def _rate_sort_key(entry):
-    # Highest saving, then priority, then latest valid_from, then id (deterministic).
+    # Verified product rule > master category > internal All. Within a scope,
+    # customer-specific rates win over both, then maximize actual rupees saved.
     rate = entry["rate"]
+    scope = 2 if rate.get("product_match") else (1 if (rate.get("category_name") or "").lower() != "all" else 0)
     vf = _parse_date(rate.get("valid_from")) or date.min
-    return (
-        entry["saving"],
-        D(rate.get("priority") or 0),
-        vf.toordinal(),
-        str(rate.get("id", "")),
-    )
+    return (scope, int(rate.get("customer_type") not in (None, "both")),
+            entry["saving"], D(rate.get("priority") or 0), vf.toordinal(), str(rate.get("id", "")))
 
 
-def best_rule_for_side(rules, price, product_category, customer_type, today=None, card=None):
-    """From a list of rate dicts of one kind, return the best eligible entry.
-
-    Returns dict with rate, saving (Decimal), applied_to (Decimal), eligible, reasons
-    for the winner, plus the full evaluated list.
-    """
+def best_rule_for_side(rules, price, product_category, customer_type, today=None,
+                       card=None, product_url=None, gift_card_denominations=None):
+    """Choose by eligible rule specificity before comparing monetary savings."""
     evaluated = []
     for rate in rules:
         if not category_matches(rate.get("category_name"), product_category):
             continue
+        if rate.get("product_match") and not product_matches(rate["product_match"], product_url):
+            continue
         eligible, reasons = rate_is_eligible(rate, price, customer_type, today, card)
-        saving, applied_to = (apply_rate(rate, price) if eligible else (ZERO, ZERO))
+        amount = price
+        if eligible and gift_card_denominations is not None:
+            cap = rate.get("maximum_eligible_amount")
+            spend_limit = min(D(price), D(cap)) if cap not in (None, "") else D(price)
+            amount = best_gift_card_spend(spend_limit, gift_card_denominations)
+            if amount <= 0:
+                eligible = False
+                reasons.append("No available gift-card denomination fits this purchase")
+        saving, applied_to = (apply_rate(rate, amount) if eligible else (ZERO, ZERO))
         evaluated.append({
             "rate": rate,
             "eligible": eligible,
@@ -160,14 +233,23 @@ def best_rule_for_side(rules, price, product_category, customer_type, today=None
             "applied_to": applied_to,
         })
 
-    eligible_entries = [e for e in evaluated if e["eligible"] and e["saving"] > 0]
+    # An eligible zero-rate exclusion must still win over a less-specific
+    # generic cashback rule; it blocks a misleading fallback recommendation.
+    eligible_entries = [entry for entry in evaluated if entry["eligible"]]
     winner = max(eligible_entries, key=_rate_sort_key) if eligible_entries else None
+    if winner and winner["saving"] == 0:
+        for entry in evaluated:
+            if entry is not winner and entry["eligible"] and _rate_sort_key(entry)[:2] < _rate_sort_key(winner)[:2]:
+                entry["eligible"] = False
+                entry["saving"] = ZERO
+                entry["applied_to"] = ZERO
+                entry["reasons"].append("Superseded by a more specific zero-rate exclusion")
     return winner, evaluated
 
 
 def calculate_stack(store, product_category, customer_type, mrp, price,
                     affiliate_rules, giftcard_rules, today=None, rate_version="v1",
-                    card=None):
+                    card=None, product_url=None, gift_card_denominations=None):
     """Full stacking calculation. Returns a JSON-serializable dict.
 
     card: optional shopper card profile {bank_name, card_type, card_network}.
@@ -180,19 +262,18 @@ def calculate_stack(store, product_category, customer_type, mrp, price,
     customer_type = (customer_type or "existing").lower()
 
     aff_winner, aff_eval = best_rule_for_side(
-        affiliate_rules, price, product_category, customer_type, today, card)
+        affiliate_rules, price, product_category, customer_type, today, card,
+        product_url=product_url)
     gc_winner, gc_eval = best_rule_for_side(
-        giftcard_rules, price, product_category, customer_type, today, card)
+        giftcard_rules, price, product_category, customer_type, today, card,
+        product_url=product_url, gift_card_denominations=gift_card_denominations)
 
     cashback_saving = aff_winner["saving"] if aff_winner else ZERO
     giftcard_saving = gc_winner["saving"] if gc_winner else ZERO
 
-    # Split-payment analysis for the gift card route
-    gc_cap = None
-    if gc_winner:
-        cap = gc_winner["rate"].get("maximum_eligible_amount")
-        gc_cap = D(cap) if cap not in (None, "") else price
-    giftcard_spend = min(price, gc_cap) if gc_cap is not None else ZERO
+    # When denominations are configured, applied_to is an attainable total of
+    # real gift cards, not an arbitrary amount up to the purchase price.
+    giftcard_spend = gc_winner["applied_to"] if gc_winner else ZERO
     other_payment_spend = max(ZERO, price - giftcard_spend) if gc_winner else ZERO
     partial_gift_card = bool(gc_winner and giftcard_saving > 0 and other_payment_spend > 0)
 
@@ -225,6 +306,13 @@ def calculate_stack(store, product_category, customer_type, mrp, price,
 
     # Verification warnings
     warnings = []
+    if giftcard_rules and gift_card_denominations is not None:
+        if not gift_card_denominations:
+            warnings.append("Gift-card savings are unavailable until verified denominations are configured for this store.")
+        elif not gc_winner:
+            warnings.append("No available gift-card denomination fits this purchase.")
+    if aff_winner and aff_winner["saving"] == 0:
+        warnings.append("A more specific zero-rate rule excludes affiliate cashback for this product or category.")
     store_name = (store or {}).get("name", "")
     if store_name.lower() in ("amazon", "flipkart"):
         warnings.append(
@@ -269,6 +357,9 @@ def calculate_stack(store, product_category, customer_type, mrp, price,
                                         if r.get("minimum_order_value") not in (None, "") else None),
                 "maximum_eligible_amount": (str(q(r["maximum_eligible_amount"]))
                                             if r.get("maximum_eligible_amount") not in (None, "") else None),
+                "cashback_cap_amount": (str(q(r["cashback_cap_amount"]))
+                                        if r.get("cashback_cap_amount") not in (None, "") else None),
+                "product_match": r.get("product_match") or None,
                 "category_name": r.get("category_name"),
                 "customer_type": r.get("customer_type"),
                 "card_eligibility": r.get("card_eligibility") or "no_card_requirement",
@@ -284,13 +375,17 @@ def calculate_stack(store, product_category, customer_type, mrp, price,
         options.sort(key=lambda o: (not o["is_best"], -float(o["saving"]["exact"])))
         return {
             "kind": kind,
-            "has_winner": winner is not None,
-            "best": options[0] if (winner and options) else None,
+            "has_winner": bool(winner and winner["saving"] > 0),
+            "best": options[0] if (winner and winner["saving"] > 0 and options) else None,
             "options": options,
         }
 
     affiliate = route_payload(aff_winner, aff_eval, "affiliate")
     gift_card = route_payload(gc_winner, gc_eval, "gift_card")
+    gift_card["denomination_status"] = ("unavailable" if giftcard_rules and gift_card_denominations == []
+                                        else "available" if gift_card_denominations else "not_applicable")
+    gift_card["available_denominations"] = ([money_out(amount) for amount in gift_card_denominations]
+                                              if gift_card_denominations is not None else None)
 
     # Mark applied vs skipped for the single-route case
     affiliate["applied"] = bool(double_stack or applied_route == "affiliate")
