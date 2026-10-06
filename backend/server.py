@@ -1790,9 +1790,13 @@ def _validate_card_rule(body):
 def _validate_rate_body(body):
     if D(body.get("value")) < 0:
         raise HTTPException(400, "Value must be non-negative")
-    for f in ("minimum_order_value", "maximum_eligible_amount"):
-        if body.get(f) not in (None, "") and D(body.get(f)) < 0:
-            raise HTTPException(400, f"{f} must be non-negative")
+    for f in (
+    "minimum_order_value",
+    "maximum_eligible_amount",
+    "maximum_cashback_amount",
+):
+    if body.get(f) not in (None, "") and D(body.get(f)) < 0:
+        raise HTTPException(400, f"{f} must be non-negative")
     vf, vu = body.get("valid_from"), body.get("valid_until")
     if vf and vu and str(vf) > str(vu):
         raise HTTPException(400, "valid_from must be before valid_until")
