@@ -1,15 +1,16 @@
 import React, { useContext, useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Sparkles, Store, Tags, ShieldCheck, Users, ArrowRight, Flame, Zap } from "lucide-react";
+import { Sparkles, Store, Tags, Users, ArrowRight, Flame, Zap } from "lucide-react";
 import { SavingsEngine } from "@/components/site/SavingsEngine";
 import { ResultsView } from "@/components/site/ResultsView";
 import { YuktiMagic } from "@/components/site/YuktiMagic";
-import { TrendingDeals, SectionHead } from "@/components/site/TrendingDeals";
+import { SectionHead } from "@/components/site/TrendingDeals";
+import { HomepagePromotions } from "@/components/site/HomepagePromotions";
 import { MandirContext } from "@/components/site/SiteLayout";
 import { useHomeBootstrap } from "@/components/site/HomeStartupGate";
 import { api } from "@/lib/api";
-import { getBrandAsset, getCategoryAsset } from "@/lib/assets";
+import { getBrandAsset } from "@/lib/assets";
 
 const AssetFallback = ({ label, className = "" }) => (
   <div className={`grid place-items-center rounded-lg border border-gold/20 bg-black/20 text-lg font-display font-700 text-gold ${className}`}>
@@ -24,7 +25,9 @@ export default function Home() {
   const handleResult = (data) => { setResult(data); setMagic(true); };
   const [initial, setInitial] = useState(null);
   const [stores, setStores] = useState(() => bootstrap?.stores || []);
+  const [homepageStores, setHomepageStores] = useState(() => bootstrap?.homepageStores || []);
   const [categories, setCategories] = useState(() => bootstrap?.categories || []);
+  const [promotions, setPromotions] = useState(() => bootstrap?.promotions || []);
   const openMandir = useContext(MandirContext);
   const [searchParams] = useSearchParams();
 
@@ -41,15 +44,13 @@ export default function Home() {
   useEffect(() => {
     document.title = "YuktiCart — Stack cashback, gift cards & discounts for the lowest bill";
     if (bootstrap) return;
+    // On later SPA visits the startup gate does not run; these remain independent
+    // parallel reads so one optional section failing does not hide the others.
     api.get("/public/stores").then(({ data }) => setStores(data)).catch(() => {});
-    api.get("/public/categories").then(({ data }) => setCategories(data)).catch(() => {});
+    api.get("/public/stores?homepage=true&limit=5").then(({ data }) => setHomepageStores(data)).catch(() => {});
+    api.get("/public/homepage/categories").then(({ data }) => setCategories(data)).catch(() => {});
+    api.get("/public/homepage/promotions").then(({ data }) => setPromotions(data)).catch(() => {});
   }, [bootstrap]);
-
-  const pickDeal = (d) => {
-    const store = stores.find((s) => s.name === d.store);
-    setInitial({ store_id: store?.id, category: d.category, customer_type: d.customer_type, mrp: d.mrp, price: d.price });
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  };
 
   return (
     <div className="space-y-20 pb-10">
@@ -92,7 +93,7 @@ export default function Home() {
           </div>
 
           <div id="engine" className="scroll-mt-20">
-            <SavingsEngine onResult={handleResult} initial={initial} initialStores={bootstrap?.stores} />
+            <SavingsEngine onResult={handleResult} initial={initial} initialStores={stores} />
           </div>
         </div>
       </section>
@@ -107,106 +108,65 @@ export default function Home() {
         )}
       </div>
 
-      <TrendingDeals onPick={pickDeal} />
+      <HomepagePromotions promotions={promotions} />
 
-      {/* Save by brand */}
-      <section className="mx-auto max-w-7xl px-4 sm:px-6" data-testid="brands-section">
-        <SectionHead icon={Store} eyebrow="Active stores" title="Shop by Brand"
-          sub="Save at your favourite stores." />
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">
-          {stores.map((s) => {
-            const image = s.logo_url || getBrandAsset(s.name);
-            return (
-              <Link key={s.id} to={`/brands?store=${encodeURIComponent(s.name)}`}
-                data-testid={`brand-${s.name.toLowerCase().replace(/[^a-z]+/g, "-")}`}
-                className="surface flex min-h-28 flex-col items-center justify-center gap-2 rounded-xl px-3 py-3 text-center text-sm font-600 text-ink transition-all hover:border-gold/40 hover:text-gold">
-                <div className="h-12 w-28 overflow-hidden rounded-lg bg-white/95 p-1.5">
-                  {image ? (
-                    <img
-                      src={image}
-                      alt={`${s.name} logo`}
-                      className="h-full w-full object-contain"
-                      loading="lazy"
-                    />
-                  ) : (
-                    <AssetFallback label={s.name} className="h-full w-full" />
-                  )}
-                </div>
-                <span>{s.name}</span>
-              </Link>
-            );
-          })}
-        </div>
-      </section>
-
-      {/* Save by category */}
+      {/* Save by category — editorial discovery data, never affiliate payout categories. */}
       <section className="mx-auto max-w-7xl px-4 sm:px-6" data-testid="categories-section">
-        <SectionHead icon={Tags} eyebrow="Active categories" title="Shop by Category" />
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-          {categories.map((c) => {
-            const image = getCategoryAsset(c.name);
-            return (
-              <Link key={c.id} to={`/categories?c=${encodeURIComponent(c.name)}`}
-                className="surface group overflow-hidden rounded-xl text-ink transition-all hover:border-gold/40">
-                <div className="h-24 overflow-hidden bg-black/20">
-                  {image ? (
-                    <img
-                      src={image}
-                      alt={`${c.name} category`}
-                      className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
-                      loading="lazy"
-                    />
-                  ) : (
-                    <AssetFallback label={c.name} className="h-full w-full rounded-none border-0" />
-                  )}
-                </div>
-                <div className="px-3 py-2.5 text-center text-sm font-600 group-hover:text-gold">{c.name}</div>
-              </Link>
-            );
-          })}
-        </div>
-      </section>
-
-      {/* Influencer offers */}
-      <section className="mx-auto max-w-7xl px-4 sm:px-6" data-testid="influencer-section">
-        <SectionHead icon={Users} eyebrow="Community" title="Influencer Offers — Coming Soon"
-          sub="Curated creator picks — each still runs through the same transparent engine." />
-        <div className="grid gap-4 sm:grid-cols-3">
-          {[
-            { n: "@BachatQueen", d: "Beauty hauls that actually stack", t: "Nykaa · Beauty" },
-            { n: "@DealDaddy", d: "Big-ticket electronics routing", t: "Amazon · Electronics" },
-            { n: "@SmartMomIndia", d: "Baby essentials on a budget", t: "Firstcry · Baby" },
-          ].map((x) => (
-            <div key={x.n} className="surface rounded-xl p-5">
-              <div className="flex items-center gap-3">
-                <span className="grid h-10 w-10 place-items-center rounded-full btn-gold font-700">{x.n[1]}</span>
-                <div><div className="font-600 text-ink">{x.n}</div><div className="text-xs text-ink-muted">{x.t}</div></div>
+        <SectionHead icon={Tags} eyebrow="Discovery" title="Save by Category" />
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+          {categories.map((category) => (
+            <Link key={category.id} to={`/categories?c=${encodeURIComponent(category.name)}`}
+              className="surface group overflow-hidden rounded-xl text-ink transition-all hover:border-gold/40">
+              <div className="h-24 overflow-hidden bg-black/20">
+                {category.image_url ? (
+                  <img src={category.image_url} alt={`${category.name} category`}
+                    className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105" loading="lazy" />
+                ) : (
+                  <AssetFallback label={category.name} className="h-full w-full rounded-none border-0" />
+                )}
               </div>
-              <p className="mt-3 text-sm text-ink-muted">{x.d}</p>
-            </div>
+              <div className="px-3 py-2.5 text-center text-sm font-600 group-hover:text-gold">{category.name}</div>
+            </Link>
           ))}
         </div>
       </section>
 
-      {/* Trust / how it works strip */}
-      <section className="mx-auto max-w-7xl px-4 sm:px-6" data-testid="trust-strip">
-        <div className="surface rounded-2xl p-6 sm:p-8">
-          <SectionHead icon={ShieldCheck} eyebrow="Why trust us" title="How It Works" />
-          <div className="grid gap-6 sm:grid-cols-3">
-            {[
-              ["1. Paste or pick", "Add a product link or choose store, category and price."],
-              ["2. We compute", "Every eligible affiliate & gift-card rule competes on exact rupees."],
-              ["3. You save", "Follow the exact checkout sequence for the lowest final bill."],
-            ].map(([t, d]) => (
-              <div key={t}>
-                <h4 className="font-display text-lg font-600 text-gold">{t}</h4>
-                <p className="mt-1 text-sm text-ink-muted">{d}</p>
-              </div>
-            ))}
-          </div>
-          <Link to="/how-it-works" className="mt-6 inline-flex items-center gap-1.5 text-sm text-gold hover:underline">
-            Read the full method <ArrowRight className="h-4 w-4" />
+      {/* Save by store — backend curates rank, visibility and top-five limit. */}
+      <section className="mx-auto max-w-7xl px-4 sm:px-6" data-testid="brands-section">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <SectionHead icon={Store} eyebrow="Featured stores" title="Save by Store"
+            sub="Save at your favourite stores." />
+          <Link to="/stores" className="mt-1 inline-flex items-center gap-1 text-sm font-600 text-gold hover:underline" data-testid="stores-view-all">
+            View All <ArrowRight className="h-4 w-4" />
           </Link>
+        </div>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+          {homepageStores.slice(0, 5).map((store) => {
+            const image = store.logo_url || store.image_url || getBrandAsset(store.name);
+            return (
+              <Link key={store.id} to={`/brands?store=${encodeURIComponent(store.name)}`}
+                data-testid={`brand-${store.name.toLowerCase().replace(/[^a-z]+/g, "-")}`}
+                className="surface flex min-h-32 flex-col items-center justify-center gap-2 rounded-xl px-3 py-4 text-center text-sm font-600 text-ink transition-colors hover:border-gold/40 hover:text-gold">
+                <div className="h-12 w-28 max-w-full overflow-hidden rounded-lg bg-white/95 p-1.5">
+                  {image ? (
+                    <img src={image} alt={`${store.name} logo`} className="h-full w-full object-contain" loading="lazy" />
+                  ) : (
+                    <AssetFallback label={store.name} className="h-full w-full" />
+                  )}
+                </div>
+                <span>{store.name}</span>
+                {store.description && <span className="line-clamp-2 text-xs font-normal text-ink-muted">{store.description}</span>}
+              </Link>
+            );
+          })}
+        </div>
+      </section>
+
+      {/* Influencer Offers remain a simple Coming Soon section until a later phase. */}
+      <section className="mx-auto max-w-7xl px-4 sm:px-6" data-testid="influencer-section">
+        <SectionHead icon={Users} eyebrow="Community" title="Influencer Offers — Coming Soon" />
+        <div className="surface rounded-xl p-6 text-sm text-ink-muted">
+          Creator-led savings are on their way.
         </div>
       </section>
     </div>

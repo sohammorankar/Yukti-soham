@@ -167,6 +167,21 @@ CATEGORIES = [
     "Appliances", "Grocery", "Toys",
 ]
 
+# Homepage discovery taxonomy is editorial content, entirely separate from
+# categories used by store affiliate payout rules and URL detection.
+# Image references only point to existing assets that clearly match the label.
+HOMEPAGE_CATEGORIES = [
+    ("Fashion", "/assets/categories/fashion.webp"),
+    ("Beauty", "/assets/categories/beauty-grooming.webp"),
+    ("Groceries", None),
+    ("Home & Kitchen", None),
+    ("Finance", None),
+    ("Travel", None),
+    ("Health & Wellness", None),
+    ("Electronics", "/assets/categories/electronics.webp"),
+    ("Large Appliances", None),
+]
+
 # category -> list of (phrase, match_type, weight, is_exclusion)
 KEYWORDS = {
     "Furniture/Home": [
@@ -324,6 +339,21 @@ async def seed_all(db):
             })
         await db.categories.insert_many(docs)
         created["categories"] = len(docs)
+
+    # Editorial homepage discovery categories (NOT affiliate payout categories).
+    # Empty-collection seeding preserves all subsequent admin edits and ordering.
+    if await db.homepage_categories.count_documents({}) == 0:
+        docs = []
+        for rank, (name, image_url) in enumerate(HOMEPAGE_CATEGORIES, start=1):
+            slug = "-".join(name.lower().replace("&", " ").split())
+            docs.append({
+                "id": sid("homepage_category", name), "name": name, "slug": slug,
+                "display_rank": rank, "image_url": image_url,
+                "active": True, "homepage_visible": True,
+                "created_at": now_iso(), "updated_at": now_iso(),
+            })
+        await db.homepage_categories.insert_many(docs)
+        created["homepage_categories"] = len(docs)
 
     # Category keywords
     if await db.category_keywords.count_documents({}) == 0:

@@ -42,7 +42,7 @@ export function SavingsEngine({ onResult, initial, initialStores }) {
   const lastDetectedUrlRef = useRef("");
 
   useEffect(() => {
-    if (initialStores) return;
+    if (initialStores) { setStores(initialStores); return; }
     api.get("/public/stores")
       .then(({ data }) => setStores(data))
       .catch(() => toast.error("Could not load stores"));
@@ -214,7 +214,7 @@ export function SavingsEngine({ onResult, initial, initialStores }) {
             onBlur={() => runDetect()}
             placeholder="Paste an Amazon, Flipkart, Myntra… product link"
             data-testid="input-url"
-            className="focus-ring h-11 w-full rounded-md border border-border bg-input pl-9 pr-10 text-sm text-foreground"
+            className="focus-ring h-11 w-full rounded-md border border-border bg-white pl-9 pr-10 text-sm text-black placeholder:text-slate-500"
           />
           {detecting && (
             <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-gold" data-testid="detect-loading" />
