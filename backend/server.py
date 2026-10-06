@@ -493,6 +493,32 @@ class HomepagePromotionBody(BaseModel):
 class GratitudeBody(BaseModel):
     idempotency_key: str
 
+async def migrate_affiliate_caps():
+    result = await db.rate_cards.update_many(
+        {
+            "platform_kind": "affiliate",
+            "maximum_eligible_amount": {"$nin": [None, ""]},
+            "$or": [
+                {"maximum_cashback_amount": {"$exists": False}},
+                {"maximum_cashback_amount": None},
+                {"maximum_cashback_amount": ""},
+            ],
+        },
+        [
+            {
+                "$set": {
+                    "maximum_cashback_amount": "$maximum_eligible_amount",
+                    "maximum_eligible_amount": None,
+                }
+            }
+        ],
+    )
+
+    logger.info(
+        "Affiliate cap migration: %s rates migrated",
+        result.modified_count,
+    )
+
 
 # --------------------------------------------------------------------------
 # Startup: indexes + seed + owner bootstrap
@@ -531,6 +557,8 @@ async def startup():
     created = await seed_all(db)
     if created:
         logger.info(f"Seeded: {created}")
+
+    await migrate_affiliate_caps()
 
     # Backfill store_url for stores created before this field existed
     for name, url in STORE_URLS.items():
@@ -1791,12 +1819,12 @@ def _validate_rate_body(body):
     if D(body.get("value")) < 0:
         raise HTTPException(400, "Value must be non-negative")
     for f in (
-    "minimum_order_value",
-    "maximum_eligible_amount",
-    "maximum_cashback_amount",
-):
-    if body.get(f) not in (None, "") and D(body.get(f)) < 0:
-        raise HTTPException(400, f"{f} must be non-negative")
+        "minimum_order_value",
+        "maximum_eligible_amount",
+        "maximum_cashback_amount",
+    ):
+        if body.get(f) not in (None, "") and D(body.get(f)) < 0:
+            raise HTTPException(400, f"{f} must be non-negative")
     vf, vu = body.get("valid_from"), body.get("valid_until")
     if vf and vu and str(vf) > str(vu):
         raise HTTPException(400, "valid_from must be before valid_until")
@@ -1834,6 +1862,7 @@ async def create_rate(body: dict, request: Request, user=Depends(require_write))
         "value_type": body.get("value_type", "percent"), "value": str(body.get("value")),
         "minimum_order_value": (str(body["minimum_order_value"]) if body.get("minimum_order_value") not in (None, "") else None),
         "maximum_eligible_amount": (str(body["maximum_eligible_amount"]) if body.get("maximum_eligible_amount") not in (None, "") else None),
+        "maximum_cashback_amount": (str(body["maximum_cashback_amount"])if body.get("maximum_cashback_amount") not in (None, "")  else None),
         "valid_from": body.get("valid_from"), "valid_until": body.get("valid_until"),
         "card_eligibility": body.get("card_eligibility") or "no_card_requirement",
         "card_criteria": body.get("card_criteria") or None,
@@ -1856,12 +1885,30 @@ async def update_rate(rid: str, body: dict, request: Request, user=Depends(requi
         raise HTTPException(404, "Not found")
     _validate_rate_body({**before, **body})
     upd = {}
-    for f in ("customer_type", "value_type", "value", "minimum_order_value",
-              "maximum_eligible_amount", "valid_from", "valid_until", "priority",
-              "notes", "active", "status", "card_eligibility", "card_criteria"):
+    for f in (
+        "customer_type",
+        "value_type",
+        "value",
+        "minimum_order_value",
+        "maximum_eligible_amount",
+        "maximum_cashback_amount",
+        "valid_from",
+        "valid_until",
+        "priority",
+        "notes",
+        "active",
+        "status",
+        "card_eligibility",
+        "card_criteria",
+    ):
         if f in body:
             v = body[f]
-            if f in ("value", "minimum_order_value", "maximum_eligible_amount") and v not in (None, ""):
+            if f in (
+                "value",
+                "minimum_order_value",
+                "maximum_eligible_amount",
+                "maximum_cashback_amount",
+            ) and v not in (None, ""):
                 v = str(v)
             upd[f] = v
     upd["updated_by"] = user["email"]
@@ -2068,7 +2115,16 @@ async def import_publish(body: dict, request: Request, user=Depends(require_writ
             "customer_type": customer_type,
             "value_type": r.get("value_type", "percent"), "value": str(r.get("value")),
             "minimum_order_value": (str(r["mov"]) if r.get("mov") not in (None, "") else None),
-            "maximum_eligible_amount": (str(r["cap"]) if r.get("cap") not in (None, "") else None),
+            "maximum_eligible_amount": (
+    str(r["cap"])
+    if plat["kind"] == "gift_card" and r.get("cap") not in (None, "")
+    else None
+),
+"maximum_cashback_amount": (
+    str(r["cap"])
+    if plat["kind"] == "affiliate" and r.get("cap") not in (None, "")
+    else None
+),
             "valid_from": r.get("valid_from"), "valid_until": r.get("valid_until"),
             "priority": 0, "notes": r.get("notes"), "active": True, "status": "published",
             "import_batch_id": batch_id, "archived_at": None,
@@ -2131,7 +2187,11 @@ async def rate_matrix(store_id: str, platform_id: str, customer_type: str = "exi
             "value": r["value"] if r else None,
             "value_type": r["value_type"] if r else "percent",
             "mov": r.get("minimum_order_value") if r else None,
-            "cap": r.get("maximum_eligible_amount") if r else None,
+           "cap": (
+    r.get("maximum_cashback_amount")
+    if r and r.get("platform_kind") == "affiliate"
+    else r.get("maximum_eligible_amount") if r else None
+),
             "valid_from": r.get("valid_from") if r else None,
             "valid_until": r.get("valid_until") if r else None,
             "active": r.get("active") if r else False,
@@ -2224,3 +2284,4 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
