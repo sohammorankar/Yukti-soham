@@ -8,7 +8,7 @@ import requests
 import json
 import random
 
-BASE_URL = "https://yukti-mvp.preview.emergentagent.com/api"
+BASE_URL = "https://affiliate-stage.preview.emergentagent.com/api"
 ADMIN_EMAIL = "owner@yukticart.com"
 ADMIN_PASSWORD = "YuktiOwner!2025"
 
