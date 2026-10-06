@@ -17,7 +17,7 @@ export function HomepagePromotions({ promotions = [] }) {
               const isExternal = Boolean(promotion.destination_url);
               const destination = isExternal
                 ? promotion.destination_url
-                : `/stores?store=${encodeURIComponent(promotion.store_slug)}`;
+                : `/stores/${encodeURIComponent(promotion.store_slug)}`;
               const PromotionLink = isExternal ? "a" : Link;
               const image = promotion.desktop_image || promotion.mobile_image;
               return (

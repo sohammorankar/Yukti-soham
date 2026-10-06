@@ -1,5 +1,5 @@
 import React, { useContext, useEffect, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Sparkles, Store, Tags, Users, ArrowRight, Flame, Zap } from "lucide-react";
 import { SavingsEngine } from "@/components/site/SavingsEngine";
@@ -30,6 +30,7 @@ export default function Home() {
   const [promotions, setPromotions] = useState(() => bootstrap?.promotions || []);
   const openMandir = useContext(MandirContext);
   const [searchParams] = useSearchParams();
+  const location = useLocation();
 
   // A product link pasted in the navbar search arrives as ?u=... — prefill the
   // Savings Engine with it (this triggers the existing auto-detect flow only).
@@ -40,6 +41,13 @@ export default function Home() {
       setTimeout(() => document.getElementById("engine")?.scrollIntoView({ behavior: "smooth" }), 120);
     }
   }, [searchParams]);
+
+  // Store pages reuse the existing #engine anchor, without adding prefill params.
+  useEffect(() => {
+    if (location.hash !== "#engine") return;
+    const frame = requestAnimationFrame(() => document.getElementById("engine")?.scrollIntoView({ behavior: "smooth" }));
+    return () => cancelAnimationFrame(frame);
+  }, [location.hash]);
 
   useEffect(() => {
     document.title = "YuktiCart — Stack cashback, gift cards & discounts for the lowest bill";
@@ -144,7 +152,7 @@ export default function Home() {
           {homepageStores.slice(0, 5).map((store) => {
             const image = store.logo_url || store.image_url || getBrandAsset(store.name);
             return (
-              <Link key={store.id} to={`/brands?store=${encodeURIComponent(store.name)}`}
+              <Link key={store.id} to={store.slug ? `/stores/${encodeURIComponent(store.slug)}` : `/brands?store=${encodeURIComponent(store.name)}`}
                 data-testid={`brand-${store.name.toLowerCase().replace(/[^a-z]+/g, "-")}`}
                 className="surface flex min-h-32 flex-col items-center justify-center gap-2 rounded-xl px-3 py-4 text-center text-sm font-600 text-ink transition-colors hover:border-gold/40 hover:text-gold">
                 <div className="h-12 w-28 max-w-full overflow-hidden rounded-lg bg-white/95 p-1.5">

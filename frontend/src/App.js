@@ -8,7 +8,8 @@ import { AuthProvider } from "@/context/AuthContext";
 import SiteLayout from "@/components/site/SiteLayout";
 import { HomeStartupGate } from "@/components/site/HomeStartupGate";
 import Home from "@/pages/Home";
-import StoresComingSoon from "@/pages/StoresComingSoon";
+import StoreDirectory from "@/pages/StoreDirectory";
+import StorePage from "@/pages/StorePage";
 import { About, Mission, HowItWorks, Privacy, Terms, AffiliateDisclosure, CashbackDisclaimer, CookiePolicy, FAQ } from "@/pages/content";
 import { FeedbackPage } from "@/pages/FeedbackPage";
 import { Brands, Categories, Deals } from "@/pages/discovery";
@@ -41,7 +42,8 @@ export default function App() {
             <Routes>
             <Route element={<SiteLayout />}>
               <Route path="/" element={<Home />} />
-              <Route path="/stores" element={<StoresComingSoon />} />
+              <Route path="/stores" element={<StoreDirectory />} />
+              <Route path="/stores/:slug" element={<StorePage />} />
               <Route path="/deals" element={<Deals />} />
               <Route path="/brands" element={<Brands />} />
               <Route path="/categories" element={<Categories />} />
