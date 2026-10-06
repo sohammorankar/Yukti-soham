@@ -18,9 +18,9 @@ function looksLikeUrl(val) {
   return /(^https?:\/\/)?([a-z0-9-]+\.)+[a-z]{2,}(\/|$|\?|#)/i.test(v);
 }
 
-export function SavingsEngine({ onResult, initial }) {
+export function SavingsEngine({ onResult, initial, initialStores }) {
   const { isAuthed } = useAuth();
-  const [stores, setStores] = useState([]);
+  const [stores, setStores] = useState(() => initialStores || []);
   const [categories, setCategories] = useState([]);
   const [categoriesForStore, setCategoriesForStore] = useState("");
   const [myCards, setMyCards] = useState([]);
@@ -42,10 +42,11 @@ export function SavingsEngine({ onResult, initial }) {
   const lastDetectedUrlRef = useRef("");
 
   useEffect(() => {
+    if (initialStores) return;
     api.get("/public/stores")
       .then(({ data }) => setStores(data))
       .catch(() => toast.error("Could not load stores"));
-  }, []);
+  }, [initialStores]);
 
   // Logged-in shoppers may optionally calculate with one of their saved cards.
   // Guests never see this and calculate exactly as before.

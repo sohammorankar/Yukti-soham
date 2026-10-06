@@ -6,6 +6,7 @@ import { ThemeProvider } from "@/context/ThemeContext";
 import { AuthProvider } from "@/context/AuthContext";
 
 import SiteLayout from "@/components/site/SiteLayout";
+import { HomeStartupGate } from "@/components/site/HomeStartupGate";
 import Home from "@/pages/Home";
 import { About, Mission, HowItWorks, Privacy, Terms, AffiliateDisclosure, CashbackDisclaimer, CookiePolicy, FAQ } from "@/pages/content";
 import { FeedbackPage } from "@/pages/FeedbackPage";
@@ -31,9 +32,10 @@ import AffiliateDestinations from "@/pages/admin/AffiliateDestinations";
 export default function App() {
   return (
     <ThemeProvider>
-      <AuthProvider>
-        <BrowserRouter>
-          <Routes>
+      <BrowserRouter>
+        <HomeStartupGate>
+          <AuthProvider>
+            <Routes>
             <Route element={<SiteLayout />}>
               <Route path="/" element={<Home />} />
               <Route path="/deals" element={<Deals />} />
@@ -71,10 +73,11 @@ export default function App() {
               <Route path="cards" element={<CardCatalogue />} />
               <Route path="audit" element={<Audit />} />
             </Route>
-          </Routes>
-          <Toaster position="top-center" richColors />
-        </BrowserRouter>
-      </AuthProvider>
+            </Routes>
+            <Toaster position="top-center" richColors />
+          </AuthProvider>
+        </HomeStartupGate>
+      </BrowserRouter>
     </ThemeProvider>
   );
 }

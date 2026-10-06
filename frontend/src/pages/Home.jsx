@@ -7,6 +7,7 @@ import { ResultsView } from "@/components/site/ResultsView";
 import { YuktiMagic } from "@/components/site/YuktiMagic";
 import { TrendingDeals, SectionHead } from "@/components/site/TrendingDeals";
 import { MandirContext } from "@/components/site/SiteLayout";
+import { useHomeBootstrap } from "@/components/site/HomeStartupGate";
 import { api } from "@/lib/api";
 import { getBrandAsset, getCategoryAsset } from "@/lib/assets";
 
@@ -17,12 +18,13 @@ const AssetFallback = ({ label, className = "" }) => (
 );
 
 export default function Home() {
+  const bootstrap = useHomeBootstrap();
   const [result, setResult] = useState(null);
   const [magic, setMagic] = useState(false);
   const handleResult = (data) => { setResult(data); setMagic(true); };
   const [initial, setInitial] = useState(null);
-  const [stores, setStores] = useState([]);
-  const [categories, setCategories] = useState([]);
+  const [stores, setStores] = useState(() => bootstrap?.stores || []);
+  const [categories, setCategories] = useState(() => bootstrap?.categories || []);
   const openMandir = useContext(MandirContext);
   const [searchParams] = useSearchParams();
 
@@ -38,9 +40,10 @@ export default function Home() {
 
   useEffect(() => {
     document.title = "YuktiCart — Stack cashback, gift cards & discounts for the lowest bill";
+    if (bootstrap) return;
     api.get("/public/stores").then(({ data }) => setStores(data)).catch(() => {});
     api.get("/public/categories").then(({ data }) => setCategories(data)).catch(() => {});
-  }, []);
+  }, [bootstrap]);
 
   const pickDeal = (d) => {
     const store = stores.find((s) => s.name === d.store);
@@ -89,7 +92,7 @@ export default function Home() {
           </div>
 
           <div id="engine" className="scroll-mt-20">
-            <SavingsEngine onResult={handleResult} initial={initial} />
+            <SavingsEngine onResult={handleResult} initial={initial} initialStores={bootstrap?.stores} />
           </div>
         </div>
       </section>
