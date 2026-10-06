@@ -166,9 +166,7 @@
 .animate-float-up { animation: float-up .6s ease both; }
 .flame { animation: flame 1.6s ease-in-out infinite; transform-origin: bottom center; }
 
-@keyframes intro-hold { from { opacity: 1; } to { opacity: 1; } }
 @keyframes intro-step { from { opacity: .3; transform: scale(.85); } to { opacity: 1; transform: scale(1); } }
-.intro-timer { animation: intro-hold 1.9s linear forwards; }
 .intro-step { opacity: .3; animation: intro-step .35s ease forwards; }
 
 @keyframes stamp-drop {

@@ -11,6 +11,8 @@ const ITEMS = [
   { to: "/admin/matrix", label: "Rate Matrix", icon: Grid3x3 },
   { to: "/admin/platforms", label: "Platforms", icon: Boxes },
   { to: "/admin/stores", label: "Stores & Domains", icon: Store },
+  { to: "/admin/homepage/categories", label: "Homepage Categories", icon: Tags },
+  { to: "/admin/homepage/promotions", label: "Homepage Promotions", icon: Sparkles },
   { to: "/admin/categories", label: "Categories & Keywords", icon: Tags },
   { to: "/admin/affiliate-destinations", label: "Partner Destinations", icon: Link2 },
   { to: "/admin/cards", label: "Card Catalogue", icon: CreditCard },

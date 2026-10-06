@@ -6,7 +6,10 @@ import { ThemeProvider } from "@/context/ThemeContext";
 import { AuthProvider } from "@/context/AuthContext";
 
 import SiteLayout from "@/components/site/SiteLayout";
+import { HomeStartupGate } from "@/components/site/HomeStartupGate";
 import Home from "@/pages/Home";
+import StoreDirectory from "@/pages/StoreDirectory";
+import StorePage from "@/pages/StorePage";
 import { About, Mission, HowItWorks, Privacy, Terms, AffiliateDisclosure, CashbackDisclaimer, CookiePolicy, FAQ } from "@/pages/content";
 import { FeedbackPage } from "@/pages/FeedbackPage";
 import { Brands, Categories, Deals } from "@/pages/discovery";
@@ -21,6 +24,8 @@ import AdminLayout from "@/pages/admin/AdminLayout";
 import Dashboard from "@/pages/admin/Dashboard";
 import Platforms from "@/pages/admin/Platforms";
 import Stores from "@/pages/admin/Stores";
+import HomepageCategories from "@/pages/admin/HomepageCategories";
+import HomepagePromotions from "@/pages/admin/HomepagePromotions";
 import CategoriesAdmin from "@/pages/admin/CategoriesAdmin";
 import Rates from "@/pages/admin/Rates";
 import Matrix from "@/pages/admin/Matrix";
@@ -31,11 +36,14 @@ import AffiliateDestinations from "@/pages/admin/AffiliateDestinations";
 export default function App() {
   return (
     <ThemeProvider>
-      <AuthProvider>
-        <BrowserRouter>
-          <Routes>
+      <BrowserRouter>
+        <HomeStartupGate>
+          <AuthProvider>
+            <Routes>
             <Route element={<SiteLayout />}>
               <Route path="/" element={<Home />} />
+              <Route path="/stores" element={<StoreDirectory />} />
+              <Route path="/stores/:slug" element={<StorePage />} />
               <Route path="/deals" element={<Deals />} />
               <Route path="/brands" element={<Brands />} />
               <Route path="/categories" element={<Categories />} />
@@ -64,6 +72,8 @@ export default function App() {
               <Route index element={<Dashboard />} />
               <Route path="platforms" element={<Platforms />} />
               <Route path="stores" element={<Stores />} />
+              <Route path="homepage/categories" element={<HomepageCategories />} />
+              <Route path="homepage/promotions" element={<HomepagePromotions />} />
               <Route path="categories" element={<CategoriesAdmin />} />
               <Route path="rates" element={<Rates />} />
               <Route path="matrix" element={<Matrix />} />
@@ -71,10 +81,11 @@ export default function App() {
               <Route path="cards" element={<CardCatalogue />} />
               <Route path="audit" element={<Audit />} />
             </Route>
-          </Routes>
-          <Toaster position="top-center" richColors />
-        </BrowserRouter>
-      </AuthProvider>
+            </Routes>
+            <Toaster position="top-center" richColors />
+          </AuthProvider>
+        </HomeStartupGate>
+      </BrowserRouter>
     </ThemeProvider>
   );
 }

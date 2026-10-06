@@ -9,17 +9,20 @@ import re
 import csv
 import io
 import uuid
+import asyncio
 import logging
 import secrets
 from datetime import datetime, timezone, timedelta, date
+from urllib.parse import urlsplit
 
 import jwt
 import bcrypt
 from fastapi import FastAPI, APIRouter, Request, Response, HTTPException, Depends, Query
+from fastapi.responses import JSONResponse
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo.errors import DuplicateKeyError
-from pydantic import BaseModel, Field, EmailStr, field_validator, model_validator
+from pydantic import BaseModel, Field, EmailStr, ValidationError, field_validator, model_validator
 from typing import List, Optional, Literal
 
 from money import D, q, round_rupee, money_out
@@ -201,6 +204,46 @@ def _is_safe_http_url(url: str) -> bool:
     return bool(re.match(r"^https?://[^\s/@]+", u, re.I))
 
 
+def _homepage_https_url(value: str) -> bool:
+    """Homepage editorial links accept HTTPS only, with no embedded credentials."""
+    if not isinstance(value, str) or re.search(r"[\s\\]", value):
+        return False
+    try:
+        parsed = urlsplit(value)
+        return (parsed.scheme == "https" and bool(parsed.hostname)
+                and parsed.username is None and parsed.password is None
+                and parsed.port != 0)
+    except ValueError:
+        return False
+
+
+def _homepage_asset(value: Optional[str]) -> Optional[str]:
+    if value in (None, ""):
+        return None
+    value = value.strip()
+    if _homepage_https_url(value):
+        return value
+    if (re.fullmatch(r"/assets/[a-zA-Z0-9_./-]+\.(?:png|jpe?g|webp|svg)", value)
+            and ".." not in value.split("/")):
+        return value
+    raise ValueError("Use an HTTPS image URL or an existing /assets/ image path")
+
+
+def _homepage_slug(value: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", (value or "").lower()).strip("-")
+    if not slug:
+        raise HTTPException(400, "A URL-safe slug or name is required")
+    return slug
+
+
+def _homepage_data(model, payload: dict) -> dict:
+    """Validate full create/merged update documents, never accept internal fields."""
+    try:
+        return model.model_validate(payload).model_dump(mode="json")
+    except ValidationError as exc:
+        raise HTTPException(422, detail=exc.errors(include_context=False, include_url=False)) from exc
+
+
 # --------------------------------------------------------------------------
 # Pydantic input models
 # --------------------------------------------------------------------------
@@ -370,6 +413,83 @@ class FeedbackBody(BaseModel):
     context: Optional[str] = None
 
 
+class HomepageCategoryBody(BaseModel):
+    """Editorial discovery taxonomy; never used for affiliate rate matching."""
+    model_config = {"extra": "forbid"}
+
+    name: str = Field(min_length=1, max_length=80)
+    slug: Optional[str] = Field(default=None, max_length=100)
+    display_rank: int = Field(default=0, ge=0)
+    image_url: Optional[str] = Field(default=None, max_length=2048)
+    active: bool = True
+    homepage_visible: bool = True
+
+    @field_validator("name")
+    @classmethod
+    def clean_name(cls, value):
+        value = value.strip()
+        if not value:
+            raise ValueError("Name required")
+        return value
+
+    @field_validator("image_url")
+    @classmethod
+    def clean_image(cls, value):
+        return _homepage_asset(value)
+
+
+class HomepagePromotionBody(BaseModel):
+    """Store-targeted editorial carousel item; activation is admin-controlled."""
+    model_config = {"extra": "forbid"}
+
+    title: str = Field(min_length=1, max_length=120)
+    subtitle: Optional[str] = Field(default=None, max_length=300)
+    desktop_image: Optional[str] = Field(default=None, max_length=2048)
+    mobile_image: Optional[str] = Field(default=None, max_length=2048)
+    store_id: str = Field(min_length=1)
+    destination_url: Optional[str] = Field(default=None, max_length=2048)
+    cta_text: str = Field(default="Shop store", min_length=1, max_length=60)
+    display_rank: int = Field(default=0, ge=0)
+    active: bool = False
+    featured: bool = False
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+
+    @field_validator("title", "cta_text", "store_id")
+    @classmethod
+    def nonempty_text(cls, value):
+        value = value.strip()
+        if not value:
+            raise ValueError("This field is required")
+        return value
+
+    @field_validator("subtitle")
+    @classmethod
+    def clean_subtitle(cls, value):
+        return value.strip() or None if value is not None else None
+
+    @field_validator("desktop_image", "mobile_image")
+    @classmethod
+    def clean_image(cls, value):
+        return _homepage_asset(value)
+
+    @field_validator("destination_url")
+    @classmethod
+    def secure_destination(cls, value):
+        if value in (None, ""):
+            return None
+        value = value.strip()
+        if not _homepage_https_url(value):
+            raise ValueError("Destination must be an HTTPS URL")
+        return value
+
+    @model_validator(mode="after")
+    def valid_dates(self):
+        if self.start_date and self.end_date and self.start_date > self.end_date:
+            raise ValueError("End date must be on or after start date")
+        return self
+
+
 class GratitudeBody(BaseModel):
     idempotency_key: str
 
@@ -398,6 +518,15 @@ async def startup():
     await db.stores.create_index("slug", unique=True, sparse=True)
     await db.stores.create_index("display_rank")
     await db.stores.create_index([("active", 1), ("homepage_visible", 1)])
+    # Editorial homepage content lives apart from rate-card/category collections.
+    await db.homepage_categories.create_index("id", unique=True)
+    await db.homepage_categories.create_index("slug", unique=True)
+    await db.homepage_categories.create_index(
+        [("active", 1), ("homepage_visible", 1), ("display_rank", 1)])
+    await db.homepage_promotions.create_index("id", unique=True)
+    await db.homepage_promotions.create_index("store_id")
+    await db.homepage_promotions.create_index(
+        [("active", 1), ("start_date", 1), ("end_date", 1), ("display_rank", 1)])
 
     created = await seed_all(db)
     if created:
@@ -796,29 +925,31 @@ STORE_PUBLIC_DETAIL_FIELDS = {"_id": 0, "id": 1, "name": 1, "slug": 1, "store_ur
                               "display_rank": 1, "featured": 1}
 
 
-async def _store_rule_flags():
-    """Return (category_flags, customer_type_flags) maps keyed by store_id.
+async def _store_affiliate_summary(store_id: Optional[str] = None):
+    """Public category choices and rule flags from one shared affiliate-rate filter.
 
-    Both are derived ONLY from ACTIVE + PUBLISHED + AFFILIATE rate cards (gift-card
-    rules are intentionally excluded, and store names are never hard-coded):
-      - category rules: an affiliate rule whose category is a real category (not the
-        wildcard "All") → the payout depends on product category.
-      - customer-type rules: an affiliate rule whose customer_type is specific
-        (new/existing, i.e. not "both") → the payout depends on customer type.
+    Only active, published, non-archived affiliate rules count. "All" stays
+    available to the calculation engine as a wildcard, but is never a shopper
+    category. Gift-card rules do not contribute to either flag or category list.
     """
-    cat_flags, ctype_flags = {}, {}
+    query = {"active": True, "status": "published", "archived_at": None,
+             "platform_kind": "affiliate"}
+    if store_id is not None:
+        query["store_id"] = store_id
+    category_flags, customer_type_flags, categories = {}, {}, {}
     cur = db.rate_cards.find(
-        {"active": True, "status": "published", "platform_kind": "affiliate"},
-        {"_id": 0, "store_id": 1, "category_name": 1, "customer_type": 1})
-    async for r in cur:
-        sid_ = r.get("store_id")
+        query, {"_id": 0, "store_id": 1, "category_name": 1, "customer_type": 1})
+    async for rule in cur:
+        sid_ = rule.get("store_id")
         if not sid_:
             continue
-        if (r.get("category_name") or "").strip().lower() != "all":
-            cat_flags[sid_] = True
-        if (r.get("customer_type") or "both").strip().lower() != "both":
-            ctype_flags[sid_] = True
-    return cat_flags, ctype_flags
+        name = (rule.get("category_name") or "").strip()
+        if name and name.casefold() != "all":
+            category_flags[sid_] = True
+            categories.setdefault(sid_, {}).setdefault(name.casefold(), {"name": name})
+        if (rule.get("customer_type") or "both").strip().lower() != "both":
+            customer_type_flags[sid_] = True
+    return category_flags, customer_type_flags, categories
 
 
 @api.get("/public/stores")
@@ -834,7 +965,7 @@ async def public_stores(homepage: bool = False, limit: int = 0):
         [("display_rank", 1), ("name", 1)]).to_list(500)
     if limit and limit > 0:
         stores = stores[:limit]
-    cat_flags, ctype_flags = await _store_rule_flags()
+    cat_flags, ctype_flags, _ = await _store_affiliate_summary()
     for s in stores:
         s["has_category_rules"] = bool(cat_flags.get(s["id"]))
         s["has_customer_type_rules"] = bool(ctype_flags.get(s["id"]))
@@ -843,13 +974,17 @@ async def public_stores(homepage: bool = False, limit: int = 0):
 
 @api.get("/public/stores/{slug}")
 async def public_store_detail(slug: str):
-    """Public store lookup by slug (foundation for future store pages). Exposes only
-    public fields; 404 when the slug does not exist or the store is not publicly active."""
+    """Public store metadata and its eligible affiliate category choices."""
     store = await db.stores.find_one(
         {"slug": (slug or "").lower(), "active": True, "archived_at": None},
         STORE_PUBLIC_DETAIL_FIELDS)
     if not store:
         raise HTTPException(status_code=404, detail="Store not found")
+    cat_flags, ctype_flags, categories = await _store_affiliate_summary(store["id"])
+    store["has_category_rules"] = bool(cat_flags.get(store["id"]))
+    store["has_customer_type_rules"] = bool(ctype_flags.get(store["id"]))
+    store["categories"] = sorted(categories.get(store["id"], {}).values(),
+                                 key=lambda category: category["name"].casefold())
     return store
 
 
@@ -857,6 +992,41 @@ async def public_store_detail(slug: str):
 async def public_categories():
     cats = await db.categories.find(public_filter(), {"_id": 0}).sort("sort_order", 1).to_list(500)
     return cats
+
+
+@api.get("/public/homepage/categories")
+async def public_homepage_categories():
+    """Visible discovery categories, independent of store affiliate categories."""
+    projection = {"_id": 0, "id": 1, "name": 1, "slug": 1,
+                  "display_rank": 1, "image_url": 1}
+    return await db.homepage_categories.find(
+        {"active": True, "homepage_visible": True}, projection
+    ).sort([("display_rank", 1), ("name", 1)]).to_list(100)
+
+
+@api.get("/public/homepage/promotions")
+async def public_homepage_promotions():
+    """Only in-window promotions targeting currently active public stores."""
+    today = datetime.now(timezone.utc).date().isoformat()
+    query = {"active": True, "$and": [
+        {"$or": [{"start_date": None}, {"start_date": {"$lte": today}}]},
+        {"$or": [{"end_date": None}, {"end_date": {"$gte": today}}]},
+    ]}
+    projection = {"_id": 0, "id": 1, "title": 1, "subtitle": 1,
+                  "desktop_image": 1, "mobile_image": 1, "store_id": 1,
+                  "destination_url": 1, "cta_text": 1, "display_rank": 1, "featured": 1}
+    rows = await db.homepage_promotions.find(query, projection).sort(
+        [("display_rank", 1), ("title", 1)]).to_list(200)
+    if not rows:
+        return []
+    stores = await db.stores.find(
+        {"id": {"$in": [row["store_id"] for row in rows]},
+         "active": True, "archived_at": None},
+        {"_id": 0, "id": 1, "slug": 1},
+    ).to_list(200)
+    slugs = {store["id"]: store.get("slug") for store in stores if store.get("slug")}
+    return [{**row, "store_slug": slugs[row["store_id"]]}
+            for row in rows if row["store_id"] in slugs]
 
 
 @api.get("/public/platforms")
@@ -1411,6 +1581,128 @@ async def restore_category(cid: str, request: Request, user=Depends(require_writ
     return {"restored": True}
 
 
+# ---- Homepage discovery content (separate from payout categories/rules) ----
+async def _unique_homepage_category(name: str, slug: str, exclude_id: str = None):
+    query = {"$or": [{"slug": slug}, {"name": re.compile(f"^{re.escape(name)}$", re.I)}]}
+    if exclude_id:
+        query["id"] = {"$ne": exclude_id}
+    if await db.homepage_categories.find_one(query, {"_id": 0, "id": 1}):
+        raise HTTPException(409, "Homepage category name or slug already exists")
+
+
+@api.get("/admin/homepage/categories")
+async def admin_homepage_categories(user=Depends(require_any_role)):
+    return await db.homepage_categories.find({}, {"_id": 0}).sort(
+        [("display_rank", 1), ("name", 1)]).to_list(200)
+
+
+@api.post("/admin/homepage/categories", status_code=201)
+async def create_homepage_category(body: HomepageCategoryBody, request: Request,
+                                   user=Depends(require_write)):
+    data = body.model_dump(mode="json")
+    data["slug"] = _homepage_slug(data["slug"] or data["name"])
+    await _unique_homepage_category(data["name"], data["slug"])
+    doc = {**data, "id": str(uuid.uuid4()), "created_at": now_iso(), "updated_at": now_iso()}
+    try:
+        await db.homepage_categories.insert_one(dict(doc))
+    except DuplicateKeyError as exc:
+        raise HTTPException(409, "Homepage category slug already exists") from exc
+    await audit(user, "create", "homepage_category", doc["id"], None, doc, request)
+    return doc
+
+
+@api.put("/admin/homepage/categories/{category_id}")
+async def update_homepage_category(category_id: str, body: dict, request: Request,
+                                   user=Depends(require_write)):
+    before = await db.homepage_categories.find_one({"id": category_id}, {"_id": 0})
+    if not before:
+        raise HTTPException(404, "Homepage category not found")
+    if not body or not set(body).issubset(HomepageCategoryBody.model_fields):
+        raise HTTPException(400, "Unknown or empty homepage category fields")
+    merged = {field: before.get(field) for field in HomepageCategoryBody.model_fields}
+    merged.update(body)
+    data = _homepage_data(HomepageCategoryBody, merged)
+    data["slug"] = _homepage_slug(data["slug"] or data["name"])
+    await _unique_homepage_category(data["name"], data["slug"], exclude_id=category_id)
+    data["updated_at"] = now_iso()
+    try:
+        await db.homepage_categories.update_one({"id": category_id}, {"$set": data})
+    except DuplicateKeyError as exc:
+        raise HTTPException(409, "Homepage category slug already exists") from exc
+    after = await db.homepage_categories.find_one({"id": category_id}, {"_id": 0})
+    await audit(user, "update", "homepage_category", category_id, before, after, request)
+    return after
+
+
+@api.delete("/admin/homepage/categories/{category_id}")
+async def deactivate_homepage_category(category_id: str, request: Request,
+                                       user=Depends(require_write)):
+    before = await db.homepage_categories.find_one({"id": category_id}, {"_id": 0})
+    if not before:
+        raise HTTPException(404, "Homepage category not found")
+    await db.homepage_categories.update_one({"id": category_id}, {"$set": {
+        "active": False, "homepage_visible": False, "updated_at": now_iso()}})
+    await audit(user, "deactivate", "homepage_category", category_id, before, None, request)
+    return {"deactivated": True}
+
+
+async def _homepage_promotion_store(store_id: str):
+    store = await db.stores.find_one(
+        {"id": store_id, "active": True, "archived_at": None},
+        {"_id": 0, "id": 1, "slug": 1})
+    if not store or not store.get("slug"):
+        raise HTTPException(400, "Select an active store for this promotion")
+    return store
+
+
+@api.get("/admin/homepage/promotions")
+async def admin_homepage_promotions(user=Depends(require_any_role)):
+    return await db.homepage_promotions.find({}, {"_id": 0}).sort(
+        [("display_rank", 1), ("title", 1)]).to_list(200)
+
+
+@api.post("/admin/homepage/promotions", status_code=201)
+async def create_homepage_promotion(body: HomepagePromotionBody, request: Request,
+                                    user=Depends(require_write)):
+    data = body.model_dump(mode="json")
+    await _homepage_promotion_store(data["store_id"])
+    doc = {**data, "id": str(uuid.uuid4()), "created_at": now_iso(), "updated_at": now_iso()}
+    await db.homepage_promotions.insert_one(dict(doc))
+    await audit(user, "create", "homepage_promotion", doc["id"], None, doc, request)
+    return doc
+
+
+@api.put("/admin/homepage/promotions/{promotion_id}")
+async def update_homepage_promotion(promotion_id: str, body: dict, request: Request,
+                                    user=Depends(require_write)):
+    before = await db.homepage_promotions.find_one({"id": promotion_id}, {"_id": 0})
+    if not before:
+        raise HTTPException(404, "Homepage promotion not found")
+    if not body or not set(body).issubset(HomepagePromotionBody.model_fields):
+        raise HTTPException(400, "Unknown or empty homepage promotion fields")
+    merged = {field: before.get(field) for field in HomepagePromotionBody.model_fields}
+    merged.update(body)
+    data = _homepage_data(HomepagePromotionBody, merged)
+    await _homepage_promotion_store(data["store_id"])
+    data["updated_at"] = now_iso()
+    await db.homepage_promotions.update_one({"id": promotion_id}, {"$set": data})
+    after = await db.homepage_promotions.find_one({"id": promotion_id}, {"_id": 0})
+    await audit(user, "update", "homepage_promotion", promotion_id, before, after, request)
+    return after
+
+
+@api.delete("/admin/homepage/promotions/{promotion_id}")
+async def deactivate_homepage_promotion(promotion_id: str, request: Request,
+                                        user=Depends(require_write)):
+    before = await db.homepage_promotions.find_one({"id": promotion_id}, {"_id": 0})
+    if not before:
+        raise HTTPException(404, "Homepage promotion not found")
+    await db.homepage_promotions.update_one({"id": promotion_id}, {"$set": {
+        "active": False, "updated_at": now_iso()}})
+    await audit(user, "deactivate", "homepage_promotion", promotion_id, before, None, request)
+    return {"deactivated": True}
+
+
 # ---- Category keywords ----
 @api.get("/admin/keywords")
 async def admin_keywords(user=Depends(require_any_role)):
@@ -1899,6 +2191,19 @@ async def onboarding_status(user=Depends(require_manage)):
         "keywords": await db.category_keywords.count_documents({"active": True}),
         "rates": await db.rate_cards.count_documents({"status": "published", "archived_at": None}),
     }
+
+
+@api.get("/health")
+async def health():
+    """Fast, uncached readiness probe; a live process alone is not sufficient."""
+    headers = {"Cache-Control": "no-store"}
+    try:
+        await asyncio.wait_for(db.command("ping"), timeout=2.0)
+    except Exception as exc:
+        logger.warning("MongoDB readiness ping failed (%s)", type(exc).__name__)
+        return JSONResponse(status_code=503, content={"ready": False, "database": False},
+                            headers=headers)
+    return JSONResponse(content={"ready": True, "database": True}, headers=headers)
 
 
 @api.get("/")

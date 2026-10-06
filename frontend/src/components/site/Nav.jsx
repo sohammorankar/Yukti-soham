@@ -58,7 +58,7 @@ export function Nav() {
             data-testid="nav-search-input"
             aria-label="Paste a product link"
             placeholder="Paste a product link to find your lowest bill…"
-            className="focus-ring h-10 w-full rounded-full border border-border bg-surface/60 pl-9 pr-3 text-sm text-ink placeholder:text-ink-muted/70"
+            className="focus-ring h-10 w-full rounded-full border border-border bg-white pl-9 pr-3 text-sm text-black placeholder:text-slate-500"
           />
         </form>
 

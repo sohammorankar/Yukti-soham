@@ -18,10 +18,11 @@ function looksLikeUrl(val) {
   return /(^https?:\/\/)?([a-z0-9-]+\.)+[a-z]{2,}(\/|$|\?|#)/i.test(v);
 }
 
-export function SavingsEngine({ onResult, initial }) {
+export function SavingsEngine({ onResult, initial, initialStores }) {
   const { isAuthed } = useAuth();
-  const [stores, setStores] = useState([]);
+  const [stores, setStores] = useState(() => initialStores || []);
   const [categories, setCategories] = useState([]);
+  const [categoriesForStore, setCategoriesForStore] = useState("");
   const [myCards, setMyCards] = useState([]);
   const [cardId, setCardId] = useState(""); // "" = no card selected (optional)
   const [url, setUrl] = useState("");
@@ -41,13 +42,11 @@ export function SavingsEngine({ onResult, initial }) {
   const lastDetectedUrlRef = useRef("");
 
   useEffect(() => {
-    (async () => {
-      try {
-        const [s, c] = await Promise.all([api.get("/public/stores"), api.get("/public/categories")]);
-        setStores(s.data); setCategories(c.data);
-      } catch { toast.error("Could not load stores/categories"); }
-    })();
-  }, []);
+    if (initialStores) { setStores(initialStores); return; }
+    api.get("/public/stores")
+      .then(({ data }) => setStores(data))
+      .catch(() => toast.error("Could not load stores"));
+  }, [initialStores]);
 
   // Logged-in shoppers may optionally calculate with one of their saved cards.
   // Guests never see this and calculate exactly as before.
@@ -66,16 +65,39 @@ export function SavingsEngine({ onResult, initial }) {
   }, [initial]);
 
   const storeOptions = useMemo(() => stores.map((s) => ({ value: s.id, label: s.name })), [stores]);
-  const catOptions = useMemo(() => categories
+  const catOptions = useMemo(() => (categoriesForStore === storeId ? categories : [])
     .filter((c) => (c.name || "").trim().toLowerCase() !== "all")
-    .map((c) => ({ value: c.name, label: c.name })), [categories]);
+    .map((c) => ({ value: c.name, label: c.name })), [categories, categoriesForStore, storeId]);
   const selectedStore = stores.find((s) => s.id === storeId);
+  const storeSlug = selectedStore?.slug;
 
-  // Category / Customer Type are shown ONLY when the selected store's affiliate
-  // payout genuinely depends on that dimension (flags come from the backend,
-  // derived from active+published affiliate rules — never hard-coded by name).
+  // These flags come from the same active, published, non-archived affiliate
+  // rules as the selected store's public category choices.
   const showCategory = !!selectedStore?.has_category_rules;
   const showCustomerType = !!selectedStore?.has_customer_type_rules;
+
+  useEffect(() => {
+    setCategories([]);
+    setCategoriesForStore("");
+    if (!storeSlug || !showCategory) return;
+    let cancelled = false;
+    api.get(`/public/stores/${encodeURIComponent(storeSlug)}`)
+      .then(({ data }) => {
+        if (cancelled) return;
+        const available = (Array.isArray(data.categories) ? data.categories : [])
+          .filter((c) => (c?.name || "").trim().toLowerCase() !== "all");
+        setCategories(available);
+        setCategoriesForStore(storeId);
+        setCategory((current) => {
+          const match = available.find((c) => c.name.toLowerCase() === (current || "").trim().toLowerCase());
+          return match?.name || "";
+        });
+      })
+      .catch(() => {
+        if (!cancelled) { setCategory(""); toast.error("Could not load store categories"); }
+      });
+    return () => { cancelled = true; };
+  }, [storeId, storeSlug, showCategory]);
 
   // When the store changes (manually or via URL detection), drop any stale value
   // for a dimension that no longer applies so it is never sent into the calc.
@@ -135,6 +157,12 @@ export function SavingsEngine({ onResult, initial }) {
   }, [url]);
 
   const onStoreChange = (val) => {
+    if (val !== storeId) {
+      setCategories([]);
+      setCategory("");
+      setDetection(null);
+      setDetectedCategory(null);
+    }
     setStoreId(val);
     setDetectedStoreName(null); // manual override clears the "detected" hint
   };
@@ -153,7 +181,9 @@ export function SavingsEngine({ onResult, initial }) {
     if (!selectedStore) { toast.error("Please choose a store"); return; }
     if (!price) { toast.error("Enter the selling price"); return; }
     if (mrp && Number(price) > Number(mrp)) { toast.error("Selling price cannot exceed MRP"); return; }
-    if (showCategory && !category) { toast.error("Please choose a category"); return; }
+    if (showCategory && !catOptions.some((option) => option.value === category)) {
+      toast.error("Please choose a category"); return;
+    }
     setLoading(true);
     try {
       const { data } = await api.post("/calculate", {
@@ -184,7 +214,7 @@ export function SavingsEngine({ onResult, initial }) {
             onBlur={() => runDetect()}
             placeholder="Paste an Amazon, Flipkart, Myntra… product link"
             data-testid="input-url"
-            className="focus-ring h-11 w-full rounded-md border border-border bg-input pl-9 pr-10 text-sm text-foreground"
+            className="focus-ring h-11 w-full rounded-md border border-border bg-white pl-9 pr-10 text-sm text-black placeholder:text-slate-500"
           />
           {detecting && (
             <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-gold" data-testid="detect-loading" />
