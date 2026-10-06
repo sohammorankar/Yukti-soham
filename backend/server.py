@@ -9,6 +9,7 @@ import re
 import csv
 import io
 import uuid
+import asyncio
 import logging
 import secrets
 from datetime import datetime, timezone, timedelta, date
@@ -16,6 +17,7 @@ from datetime import datetime, timezone, timedelta, date
 import jwt
 import bcrypt
 from fastapi import FastAPI, APIRouter, Request, Response, HTTPException, Depends, Query
+from fastapi.responses import JSONResponse
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo.errors import DuplicateKeyError
@@ -796,29 +798,31 @@ STORE_PUBLIC_DETAIL_FIELDS = {"_id": 0, "id": 1, "name": 1, "slug": 1, "store_ur
                               "display_rank": 1, "featured": 1}
 
 
-async def _store_rule_flags():
-    """Return (category_flags, customer_type_flags) maps keyed by store_id.
+async def _store_affiliate_summary(store_id: Optional[str] = None):
+    """Public category choices and rule flags from one shared affiliate-rate filter.
 
-    Both are derived ONLY from ACTIVE + PUBLISHED + AFFILIATE rate cards (gift-card
-    rules are intentionally excluded, and store names are never hard-coded):
-      - category rules: an affiliate rule whose category is a real category (not the
-        wildcard "All") → the payout depends on product category.
-      - customer-type rules: an affiliate rule whose customer_type is specific
-        (new/existing, i.e. not "both") → the payout depends on customer type.
+    Only active, published, non-archived affiliate rules count. "All" stays
+    available to the calculation engine as a wildcard, but is never a shopper
+    category. Gift-card rules do not contribute to either flag or category list.
     """
-    cat_flags, ctype_flags = {}, {}
+    query = {"active": True, "status": "published", "archived_at": None,
+             "platform_kind": "affiliate"}
+    if store_id is not None:
+        query["store_id"] = store_id
+    category_flags, customer_type_flags, categories = {}, {}, {}
     cur = db.rate_cards.find(
-        {"active": True, "status": "published", "platform_kind": "affiliate"},
-        {"_id": 0, "store_id": 1, "category_name": 1, "customer_type": 1})
-    async for r in cur:
-        sid_ = r.get("store_id")
+        query, {"_id": 0, "store_id": 1, "category_name": 1, "customer_type": 1})
+    async for rule in cur:
+        sid_ = rule.get("store_id")
         if not sid_:
             continue
-        if (r.get("category_name") or "").strip().lower() != "all":
-            cat_flags[sid_] = True
-        if (r.get("customer_type") or "both").strip().lower() != "both":
-            ctype_flags[sid_] = True
-    return cat_flags, ctype_flags
+        name = (rule.get("category_name") or "").strip()
+        if name and name.casefold() != "all":
+            category_flags[sid_] = True
+            categories.setdefault(sid_, {}).setdefault(name.casefold(), {"name": name})
+        if (rule.get("customer_type") or "both").strip().lower() != "both":
+            customer_type_flags[sid_] = True
+    return category_flags, customer_type_flags, categories
 
 
 @api.get("/public/stores")
@@ -834,7 +838,7 @@ async def public_stores(homepage: bool = False, limit: int = 0):
         [("display_rank", 1), ("name", 1)]).to_list(500)
     if limit and limit > 0:
         stores = stores[:limit]
-    cat_flags, ctype_flags = await _store_rule_flags()
+    cat_flags, ctype_flags, _ = await _store_affiliate_summary()
     for s in stores:
         s["has_category_rules"] = bool(cat_flags.get(s["id"]))
         s["has_customer_type_rules"] = bool(ctype_flags.get(s["id"]))
@@ -843,13 +847,17 @@ async def public_stores(homepage: bool = False, limit: int = 0):
 
 @api.get("/public/stores/{slug}")
 async def public_store_detail(slug: str):
-    """Public store lookup by slug (foundation for future store pages). Exposes only
-    public fields; 404 when the slug does not exist or the store is not publicly active."""
+    """Public store metadata and its eligible affiliate category choices."""
     store = await db.stores.find_one(
         {"slug": (slug or "").lower(), "active": True, "archived_at": None},
         STORE_PUBLIC_DETAIL_FIELDS)
     if not store:
         raise HTTPException(status_code=404, detail="Store not found")
+    cat_flags, ctype_flags, categories = await _store_affiliate_summary(store["id"])
+    store["has_category_rules"] = bool(cat_flags.get(store["id"]))
+    store["has_customer_type_rules"] = bool(ctype_flags.get(store["id"]))
+    store["categories"] = sorted(categories.get(store["id"], {}).values(),
+                                 key=lambda category: category["name"].casefold())
     return store
 
 
@@ -1899,6 +1907,19 @@ async def onboarding_status(user=Depends(require_manage)):
         "keywords": await db.category_keywords.count_documents({"active": True}),
         "rates": await db.rate_cards.count_documents({"status": "published", "archived_at": None}),
     }
+
+
+@api.get("/health")
+async def health():
+    """Fast, uncached readiness probe; a live process alone is not sufficient."""
+    headers = {"Cache-Control": "no-store"}
+    try:
+        await asyncio.wait_for(db.command("ping"), timeout=2.0)
+    except Exception as exc:
+        logger.warning("MongoDB readiness ping failed (%s)", type(exc).__name__)
+        return JSONResponse(status_code=503, content={"ready": False, "database": False},
+                            headers=headers)
+    return JSONResponse(content={"ready": True, "database": True}, headers=headers)
 
 
 @api.get("/")
