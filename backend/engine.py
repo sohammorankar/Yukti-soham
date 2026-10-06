@@ -112,15 +112,20 @@ def apply_rate(rate, price):
     if (rate.get("value_type") or "percent") == "percent":
         amount = price * D(rate.get("value")) / Decimal("100")
 
-        # Affiliate cashback cap
-        cashback_cap = rate.get("maximum_cashback_amount")
-        if cashback_cap not in (None, ""):
-            amount = min(amount, D(cashback_cap))
+        # Affiliate cashback has a cashback-amount cap.
+        # Gift-card rules retain their existing eligible-spend cap.
+        if rate.get("platform_kind") == "affiliate":
+            cap = rate.get("maximum_cashback_amount")
+            if cap not in (None, ""):
+                amount = min(amount, D(cap))
+        else:
+            cap = rate.get("maximum_eligible_amount")
+            if cap not in (None, ""):
+                amount = min(amount, D(cap))
 
         applied_to = price
-
     else:
-        # Existing flat-rate behavior
+        # Preserve existing flat-rate behavior.
         amount = D(rate.get("value"))
         applied_to = price
 
@@ -272,8 +277,24 @@ def calculate_stack(store, product_category, customer_type, mrp, price,
                 "applied_to": money_out(e["applied_to"]),
                 "minimum_order_value": (str(q(r["minimum_order_value"]))
                                         if r.get("minimum_order_value") not in (None, "") else None),
-                "maximum_eligible_amount": (str(q(r["maximum_eligible_amount"]))
-                                            if r.get("maximum_eligible_amount") not in (None, "") else None),
+                # Surface the cap that actually applies to this route.
+                "maximum_cashback_amount": (
+                    str(q(r["maximum_cashback_amount"]))
+                    if kind == "affiliate" and r.get("maximum_cashback_amount") not in (None, "")
+                    else None
+                ),
+                "maximum_eligible_amount": (
+                    str(q(r["maximum_eligible_amount"]))
+                    if kind == "gift_card" and r.get("maximum_eligible_amount") not in (None, "")
+                    else None
+                ),
+                "cap": (
+                    str(q(r["maximum_cashback_amount"]))
+                    if kind == "affiliate" and r.get("maximum_cashback_amount") not in (None, "")
+                    else str(q(r["maximum_eligible_amount"]))
+                    if kind == "gift_card" and r.get("maximum_eligible_amount") not in (None, "")
+                    else None
+                ),
                 "category_name": r.get("category_name"),
                 "customer_type": r.get("customer_type"),
                 "card_eligibility": r.get("card_eligibility") or "no_card_requirement",
