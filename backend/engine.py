@@ -107,18 +107,23 @@ def rate_is_eligible(rate, price, customer_type, today=None, card=None):
 
 
 def apply_rate(rate, price):
-    """Compute saving amount + applied base for an eligible rate (exact Decimal)."""
     price = D(price)
-    cap = rate.get("maximum_eligible_amount")
-    if cap not in (None, ""):
-        applied_to = min(price, D(cap))
-    else:
-        applied_to = price
 
     if (rate.get("value_type") or "percent") == "percent":
-        amount = applied_to * D(rate.get("value")) / Decimal("100")
-    else:  # flat_amount
+        amount = price * D(rate.get("value")) / Decimal("100")
+
+        # Affiliate cashback cap
+        cashback_cap = rate.get("maximum_cashback_amount")
+        if cashback_cap not in (None, ""):
+            amount = min(amount, D(cashback_cap))
+
+        applied_to = price
+
+    else:
+        # Existing flat-rate behavior
         amount = D(rate.get("value"))
+        applied_to = price
+
     return q(amount), q(applied_to)
 
 
