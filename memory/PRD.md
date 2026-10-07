@@ -42,7 +42,21 @@ secure server-side authz + audit; accessible responsive premium UI.
   env examples, README.
 - Testing: backend 11/11 pytest pass; frontend flows + all footer pages verified.
 
+## Implemented (2026-10-07) — Smart Rate Import Phase 1
+- Rate Matrix accepts generic natural-language partner sheets as well as legacy spreadsheet rows.
+- Detects `new` / `existing` / `both`, expands top-level category lists and grouped expressions,
+  preserves legitimate labels such as `All Footwear`, and maps only explicit fallback wording to
+  the internal `All` wildcard.
+- Final preview is record-level and shows category, rate, user type, CREATE/UPDATE/UNCHANGED/
+  NEEDS REVIEW action, previous rate, status, warnings, and requested summary counts.
+- Affiliate payout caps use additive `maximum_cashback_amount`; gift-card eligible-spend caps remain
+  `maximum_eligible_amount`. MOV, validity, notes, history, publish supersession, and rollback remain
+  compatible with existing rate cards.
+- Focused verification: 15/15 Phase 1 parser/preview/cap/guardrail tests pass; frontend production
+  build passes. No business data, collections, images, assets, or deployment were created.
+
 ## Backlog (prioritized)
+- **P1 / Phase 2:** Shopper-facing category grouping and presentation for expanded partner categories.
 - **P1:** MFA for admins; email verification flow; password reset UI; recent-login reauth for role
   changes. Full keyboard cell editing / multi-select / fill-down in the Rate Matrix grid.
 - **P2:** Draft→publish workflow surfaced in Matrix; per-store rate versioning UI; category

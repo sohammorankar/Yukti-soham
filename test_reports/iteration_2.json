@@ -1,0 +1,55 @@
+{
+  "summary": "Phase-1 targeted verification completed for parser/preview/publish safeguards and frontend Matrix/build. Ran isolated, DB-write-free tests with fake read-only collections and source inspection. 14/15 focused backend tests passed; 1 parser case failed.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "/api/admin/rates/import/preview",
+        "issue": "Natural-language single-line input like '3% Cashback on Beauty and Personal Care (Existing Users)' is misclassified as header and parsed into zero rows.",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "Live UI/API smoke",
+        "issue": "Not executed in this run due missing frontend/.env and unavailable backend/public endpoint context (external URL previously 502).",
+        "affected_selectors": [
+          "data-testid=import-preview",
+          "data-testid=preview-summary"
+        ]
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_ratesheet_phase1.py",
+    "/app/test_reports/pytest/pytest_ratesheet_phase1.xml"
+  ],
+  "action_items": [
+    "Fix header detection in parse_paste(): current has_header logic treats any first line containing words like 'existing' as CSV header; require stronger header signal (e.g., multiple columns and known header tokens) before skipping first line.",
+    "After fix, retest the failing inline natural-language case and full 8-case parser set.",
+    "If environment is restored, run live Matrix UI integration smoke against real backend URL."
+  ],
+  "critical_code_review_comments": [
+    "parse_paste() has a false-positive header heuristic causing data loss for natural one-line inputs that include 'new/existing' wording.",
+    "Publish guardrails are present by source: accepts CREATE/UPDATE only, validates row customer_type, rejects duplicate category+customer_type keys, and preserves rollback/history fields (inserted_ids/superseded_ids/rejected + rollback restore).",
+    "Affiliate/gift-card cap separation is implemented: affiliate uses maximum_cashback_amount payout cap; gift-card continues maximum_eligible_amount spend cap behavior."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_ratesheet_phase1.py",
+    "/app/test_reports/iteration_2.json"
+  ],
+  "success_rate": {
+    "backend": "93% (14/15 focused tests)",
+    "frontend": "Build pass; runtime integration not executed"
+  },
+  "test_credentials": "Missing: /app/memory/test_credentials.md not found.",
+  "seed_data_creation": "None. Used MOCKED fake read-only collection objects for preview logic verification.",
+  "retest_needed": true,
+  "main_agent_can_self_test": false,
+  "context_for_next_testing_agent": "Focused file added: /app/backend/tests/test_ratesheet_phase1.py. Current failing case is test_parser_core_cases for inline single-line natural text with existing-user wording. Preview decision count scenario passes with actions [UNCHANGED, CREATE, UPDATE, CREATE, NEEDS REVIEW] and exact counts. Frontend Matrix source confirms required preview columns and summary counters; yarn build succeeds with pre-existing hook dependency warnings.",
+  "rca of the issue": "Repro: call parse_paste('3% Cashback on Beauty and Personal Care (Existing Users)', 'existing'). Expected one parsed row; actual []. Root cause: has_header=true when first line contains token 'existing', so parser treats the only line as header and starts data loop from lines[1:], producing zero output. Mitigation: tighten header detection (require delimiter-based multi-column structure and explicit column-name patterns) before skipping first row."
+}

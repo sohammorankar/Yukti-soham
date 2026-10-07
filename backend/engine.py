@@ -112,7 +112,10 @@ def rate_is_eligible(rate, price, customer_type, today=None, card=None):
 def apply_rate(rate, price):
     """Compute saving amount + applied base for an eligible rate (exact Decimal)."""
     price = D(price)
+    kind = rate.get("platform_kind")
     cap = rate.get("maximum_eligible_amount")
+    if kind == "affiliate" and rate.get("maximum_cashback_amount") not in (None, ""):
+        cap = None
     if cap not in (None, ""):
         applied_to = min(price, D(cap))
     else:
@@ -122,7 +125,9 @@ def apply_rate(rate, price):
         amount = applied_to * D(rate.get("value")) / Decimal("100")
     else:  # flat_amount
         amount = D(rate.get("value"))
-    payout_cap = rate.get("cashback_cap_amount")
+    payout_cap = rate.get("maximum_cashback_amount")
+    if payout_cap in (None, ""):
+        payout_cap = rate.get("cashback_cap_amount")
     if payout_cap not in (None, ""):
         amount = min(amount, D(payout_cap))
     return q(amount), q(applied_to)
@@ -357,6 +362,8 @@ def calculate_stack(store, product_category, customer_type, mrp, price,
                                         if r.get("minimum_order_value") not in (None, "") else None),
                 "maximum_eligible_amount": (str(q(r["maximum_eligible_amount"]))
                                             if r.get("maximum_eligible_amount") not in (None, "") else None),
+                "maximum_cashback_amount": (str(q(r["maximum_cashback_amount"]))
+                                            if r.get("maximum_cashback_amount") not in (None, "") else None),
                 "cashback_cap_amount": (str(q(r["cashback_cap_amount"]))
                                         if r.get("cashback_cap_amount") not in (None, "") else None),
                 "product_match": r.get("product_match") or None,

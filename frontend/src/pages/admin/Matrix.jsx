@@ -6,8 +6,24 @@ import { Download, ClipboardPaste, Upload, RotateCcw, CheckCircle2 } from "lucid
 import { useMeta } from "@/lib/useMeta";
 
 const STATUS_COLOR = {
-  new: "text-savings", changed: "text-amber-400", unchanged: "text-ink-muted",
-  invalid: "text-destructive", unmatched: "text-destructive", duplicate: "text-amber-400",
+  CREATE: "text-savings", UPDATE: "text-amber-400", UNCHANGED: "text-ink-muted",
+  "NEEDS REVIEW": "text-destructive",
+};
+
+const SUMMARY_LABELS = {
+  parsed_records: "Parsed Records", new: "New", existing: "Existing", both: "Both",
+  create: "Create", update: "Update", unchanged: "Unchanged", errors: "Errors",
+};
+
+const rateLabel = (row) => row.value != null
+  ? (row.value_type === "percent" ? `${row.value}%` : `₹${row.value}`)
+  : "—";
+
+const notesLabel = (row) => {
+  if (row.action === "NEEDS REVIEW") {
+    return [row.reason, row.source_text ? `Source: ${row.source_text}` : null].filter(Boolean).join(" — ");
+  }
+  return row.notes || "";
 };
 
 export default function Matrix() {
@@ -37,6 +53,7 @@ export default function Matrix() {
 
   const platOptions = useMemo(() => platforms.map((p) => ({ value: p.id, label: `${p.name} (${p.kind === "affiliate" ? "Aff" : "GC"})` })), [platforms]);
   const storeOptions = useMemo(() => stores.map((s) => ({ value: s.id, label: s.name })), [stores]);
+  const selectedPlatform = useMemo(() => platforms.find((p) => p.id === sel.platform_id), [platforms, sel.platform_id]);
 
   const doPreview = async () => {
     if (!ready) { toast.error("Choose store and platform"); return; }
@@ -66,19 +83,21 @@ export default function Matrix() {
       });
   };
 
-  const publishable = preview?.rows.filter((r) => ["new", "changed"].includes(r.status)).length || 0;
+  const publishable = preview?.rows.filter((r) => ["CREATE", "UPDATE"].includes(r.action)).length || 0;
+  const unsafe = preview?.counts?.errors || 0;
 
   return (
     <div className="mx-auto max-w-5xl">
       <h1 className="font-display text-3xl font-600 text-ink">Rate Matrix &amp; Bulk Paste</h1>
-      <p className="text-sm text-ink-muted">Optimized for daily Amazon/Flipkart updates. Paste a spreadsheet table, preview, then publish atomically.</p>
+      <p className="text-sm text-ink-muted">Paste a partner rate sheet in its natural format or use spreadsheet rows, review the final records, then publish atomically.</p>
 
       <div className="mt-5 grid gap-3 sm:grid-cols-3">
         <Combobox options={storeOptions} value={sel.store_id} onChange={(v) => setSel({ ...sel, store_id: v })} placeholder="Store" testid="matrix-store" />
         <Combobox options={platOptions} value={sel.platform_id} onChange={(v) => setSel({ ...sel, platform_id: v })} placeholder="Platform" testid="matrix-platform" />
         <select value={sel.customer_type} onChange={(e) => setSel({ ...sel, customer_type: e.target.value })}
+          aria-label="Default user type for spreadsheet rows"
           data-testid="matrix-customer-type" className="h-11 rounded-md border border-border bg-input px-3 text-sm text-foreground">
-          <option value="existing">Existing</option><option value="new">New</option><option value="both">Both</option>
+          <option value="existing">Default: Existing</option><option value="new">Default: New</option><option value="both">Default: Both</option>
         </select>
       </div>
 
@@ -92,7 +111,7 @@ export default function Matrix() {
           <div className="surface mt-2 max-h-72 overflow-auto rounded-xl">
             <table className="w-full text-sm">
               <thead className="sticky top-0 bg-surface-2 text-left text-xs uppercase text-ink-muted">
-                <tr><th className="p-2.5">Category</th><th className="p-2.5">Rate</th><th className="p-2.5">MOV</th><th className="p-2.5">Cap</th><th className="p-2.5">Active</th></tr>
+                <tr><th className="p-2.5">Category</th><th className="p-2.5">Rate</th><th className="p-2.5">MOV</th><th className="p-2.5">{selectedPlatform?.kind === "affiliate" ? "Cashback cap" : "Eligible spend cap"}</th><th className="p-2.5">Active</th></tr>
               </thead>
               <tbody>
                 {matrix.map((m) => (
@@ -111,9 +130,9 @@ export default function Matrix() {
           {/* Bulk paste */}
           <div className="surface mt-5 rounded-xl p-4">
             <div className="flex items-center gap-2 text-sm font-600 text-ink"><ClipboardPaste className="h-4 w-4 text-gold" /> Bulk paste</div>
-            <p className="mt-1 text-xs text-ink-muted">Paste from a spreadsheet. Supports <code>Category&lt;TAB&gt;Rate</code> or rich columns: Category | New | Existing | Type | MOV | Cap | Valid From | Valid Until | Notes. Values like <code>3.5%</code> or <code>₹40</code>.</p>
+            <p className="mt-1 text-xs text-ink-muted">Paste natural partner text with alternating rate and cashback lines, or spreadsheet columns: Category | New | Existing | Type | MOV | Cap | Valid From | Valid Until | Notes.</p>
             <textarea value={raw} onChange={(e) => setRaw(e.target.value)} rows={6} data-testid="matrix-paste"
-              placeholder={"Category\tExisting Rate\nElectronics\t3.5%\nFurniture/Home\t5%\nBooks\t₹40"}
+              placeholder={"6%\nCashback on Home & Kitchen | Beauty and Personal Care (New Users)\n\n3%\nCashback on Home & Kitchen | Beauty and Personal Care (Existing Users)"}
               className="mt-3 w-full rounded-md border border-border bg-input p-3 font-mono text-sm text-foreground" />
             <div className="mt-3 flex gap-2">
               <button onClick={doPreview} data-testid="matrix-preview-btn" className="inline-flex items-center gap-1.5 rounded-full border border-gold/40 px-4 py-2 text-sm text-gold hover:bg-gold/10"><Upload className="h-4 w-4" /> Preview import</button>
@@ -123,32 +142,43 @@ export default function Matrix() {
           {/* Preview */}
           {preview && (
             <div className="surface mt-4 rounded-xl p-4" data-testid="import-preview">
-              <div className="flex flex-wrap items-center gap-2 text-xs">
-                {Object.entries(preview.counts).map(([k, v]) => (
-                  <span key={k} className={`rounded-full border border-border px-2.5 py-1 ${STATUS_COLOR[k] || "text-ink-muted"}`}>{k}: {v}</span>
+              <div className="flex flex-wrap items-center gap-2 text-xs" data-testid="preview-summary">
+                {Object.entries(SUMMARY_LABELS).map(([key, label]) => (
+                  <span key={key} data-testid={`preview-summary-${key}`} className={`rounded-full border border-border px-2.5 py-1 ${key === "errors" && preview.counts[key] ? "text-destructive" : "text-ink-muted"}`}>
+                    {label}: {preview.counts[key] || 0}
+                  </span>
                 ))}
               </div>
-              <div className="mt-3 max-h-72 overflow-auto">
-                <table className="w-full text-sm">
-                  <thead className="text-left text-xs uppercase text-ink-muted"><tr><th className="p-2">Input</th><th className="p-2">Matched</th><th className="p-2">Value</th><th className="p-2">Status</th><th className="p-2">Note</th></tr></thead>
+              {unsafe > 0 && (
+                <div className="mt-3 border-l-2 border-destructive bg-destructive/10 px-3 py-2 text-xs text-destructive" data-testid="preview-review-warning">
+                  Resolve or cancel this import. Rows marked Needs Review will not be published.
+                </div>
+              )}
+              <div className="mt-3 max-h-80 overflow-auto">
+                <table className="w-full min-w-[900px] text-sm">
+                  <thead className="sticky top-0 bg-surface text-left text-xs uppercase text-ink-muted">
+                    <tr><th className="p-2">Category</th><th className="p-2">Rate</th><th className="p-2">User Type</th><th className="p-2">Action</th><th className="p-2">Previous Rate</th><th className="p-2">Status</th><th className="p-2">Notes / Warnings</th></tr>
+                  </thead>
                   <tbody>
                     {preview.rows.map((r, i) => (
                       <tr key={i} className="border-t border-border" data-testid={`preview-row-${i}`}>
-                        <td className="p-2 text-ink">{r.input_category}</td>
-                        <td className="p-2 text-ink-muted">{r.matched_category || r.suggestion || "—"}</td>
-                        <td className="p-2 savings-text">{r.value != null ? (r.value_type === "percent" ? `${r.value}%` : `₹${r.value}`) : "—"}</td>
-                        <td className={`p-2 font-600 ${STATUS_COLOR[r.status]}`} data-testid={`preview-status-${i}`}>{r.status}</td>
-                        <td className="p-2 text-xs text-ink-muted">{r.reason || r.previous_value || ""}</td>
+                        <td className="p-2 text-ink" data-testid={`preview-category-${i}`}>{r.matched_category || r.category || r.input_category || "—"}</td>
+                        <td className="p-2 savings-text" data-testid={`preview-rate-${i}`}>{rateLabel(r)}</td>
+                        <td className="p-2 capitalize text-ink-muted" data-testid={`preview-user-type-${i}`}>{r.customer_type || "—"}</td>
+                        <td className={`p-2 font-600 ${STATUS_COLOR[r.action] || "text-ink-muted"}`} data-testid={`preview-action-${i}`}>{r.action}</td>
+                        <td className="p-2 text-ink-muted" data-testid={`preview-previous-rate-${i}`}>{r.previous_rate || "—"}</td>
+                        <td className="p-2 text-ink-muted" data-testid={`preview-status-${i}`}>{r.status}</td>
+                        <td className="max-w-xs p-2 text-xs text-ink-muted" data-testid={`preview-notes-${i}`}>{notesLabel(r)}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
               <div className="mt-3 flex items-center gap-3">
-                <button onClick={doPublish} disabled={!publishable} data-testid="matrix-publish-btn" className="btn-gold inline-flex items-center gap-1.5 rounded-full px-5 py-2 text-sm font-700 disabled:opacity-50">
+                <button onClick={doPublish} disabled={!publishable || unsafe > 0} data-testid="matrix-publish-btn" className="btn-gold inline-flex items-center gap-1.5 rounded-full px-5 py-2 text-sm font-700 disabled:opacity-50">
                   <CheckCircle2 className="h-4 w-4" /> Publish {publishable} rows atomically
                 </button>
-                <button onClick={() => setPreview(null)} className="text-sm text-ink-muted hover:text-ink">Cancel</button>
+                <button onClick={() => setPreview(null)} data-testid="matrix-preview-cancel" className="text-sm text-ink-muted hover:text-ink">Cancel</button>
               </div>
             </div>
           )}

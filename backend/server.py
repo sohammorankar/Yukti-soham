@@ -1790,7 +1790,7 @@ def _validate_card_rule(body):
 def _validate_rate_body(body):
     if D(body.get("value")) < 0:
         raise HTTPException(400, "Value must be non-negative")
-    for f in ("minimum_order_value", "maximum_eligible_amount"):
+    for f in ("minimum_order_value", "maximum_eligible_amount", "maximum_cashback_amount"):
         if body.get(f) not in (None, "") and D(body.get(f)) < 0:
             raise HTTPException(400, f"{f} must be non-negative")
     vf, vu = body.get("valid_from"), body.get("valid_until")
@@ -1830,6 +1830,7 @@ async def create_rate(body: dict, request: Request, user=Depends(require_write))
         "value_type": body.get("value_type", "percent"), "value": str(body.get("value")),
         "minimum_order_value": (str(body["minimum_order_value"]) if body.get("minimum_order_value") not in (None, "") else None),
         "maximum_eligible_amount": (str(body["maximum_eligible_amount"]) if body.get("maximum_eligible_amount") not in (None, "") else None),
+        "maximum_cashback_amount": (str(body["maximum_cashback_amount"]) if body.get("maximum_cashback_amount") not in (None, "") else None),
         "valid_from": body.get("valid_from"), "valid_until": body.get("valid_until"),
         "card_eligibility": body.get("card_eligibility") or "no_card_requirement",
         "card_criteria": body.get("card_criteria") or None,
@@ -1853,11 +1854,13 @@ async def update_rate(rid: str, body: dict, request: Request, user=Depends(requi
     _validate_rate_body({**before, **body})
     upd = {}
     for f in ("customer_type", "value_type", "value", "minimum_order_value",
-              "maximum_eligible_amount", "valid_from", "valid_until", "priority",
+              "maximum_eligible_amount", "maximum_cashback_amount",
+              "valid_from", "valid_until", "priority",
               "notes", "active", "status", "card_eligibility", "card_criteria"):
         if f in body:
             v = body[f]
-            if f in ("value", "minimum_order_value", "maximum_eligible_amount") and v not in (None, ""):
+            if f in ("value", "minimum_order_value", "maximum_eligible_amount",
+                     "maximum_cashback_amount") and v not in (None, ""):
                 v = str(v)
             upd[f] = v
     upd["updated_by"] = user["email"]
@@ -1902,76 +1905,279 @@ async def activate_rate(rid: str, body: dict, request: Request, user=Depends(req
 
 # ---- Bulk paste / CSV import ----
 
+def _decimal_text(value):
+    text = format(D(value), "f")
+    return text.rstrip("0").rstrip(".") if "." in text else text
+
+
 def parse_rate_token(token, default_type="percent"):
     token = (token or "").strip()
     if not token:
         return None, None
     if "%" in token:
-        return "percent", token.replace("%", "").strip()
-    if "₹" in token.lower() or token.lower().startswith("rs") or token.lower().startswith("inr"):
-        return "flat_amount", re.sub(r"[^0-9.]", "", token)
-    num = re.sub(r"[^0-9.]", "", token)
-    return default_type, num
+        value_type = "percent"
+    elif re.search(r"(?:₹|\brs\.?\s*|\binr\s*)", token, re.I):
+        value_type = "flat_amount"
+    else:
+        value_type = default_type
+    match = re.search(r"\d[\d,]*(?:\.\d+)?", token)
+    if not match:
+        return None, None
+    return value_type, _decimal_text(match.group(0).replace(",", ""))
 
 
-def parse_paste(raw: str):
-    """Parse tab/comma/pipe delimited spreadsheet paste. Return list of dict rows."""
-    rows = []
-    lines = [l for l in raw.replace("\r", "").split("\n") if l.strip()]
+def _looks_like_rate(token):
+    return bool(re.fullmatch(
+        r"\s*(?:(?:₹|rs\.?|inr)\s*)?\d[\d,]*(?:\.\d+)?\s*%?\s*",
+        token or "", re.I))
+
+
+def _customer_type_from_text(text):
+    value = text or ""
+    if re.search(r"\bnew\s*(?:and|&)\s*existing\b|\bexisting\s*(?:and|&)\s*new\b", value, re.I):
+        return "both"
+    if re.search(r"\bnew\s+(?:users?|customers?)\b|\bfirst[- ]time\s+(?:users?|customers?)\b", value, re.I):
+        return "new"
+    if re.search(r"\bexisting\s+(?:users?|customers?)\b|\bold\s+(?:users?|customers?)\b", value, re.I):
+        return "existing"
+    if re.search(r"\ball\s+(?:[\w&.-]+\s+){0,3}(?:users?|customers?)\b", value, re.I):
+        return "both"
+    return "both"
+
+
+def _extract_amount(text, pattern):
+    match = re.search(pattern + r"\s*(?:of\s+|at\s+)?(?:₹|rs\.?|inr)\s*(\d[\d,]*(?:\.\d+)?)", text, re.I)
+    if not match:
+        return None
+    return _decimal_text(match.group(1).replace(",", ""))
+
+
+def _natural_category_text(text):
+    value = re.sub(r"^\s*(?:cashback|rewards?|commission)\s+on\s+", "", text, flags=re.I)
+    value = re.sub(r"\s*\((?:new|existing)\s+(?:users?|customers?)\)\s*", " ", value, flags=re.I)
+    value = re.sub(r"\s*\((?:new\s*(?:and|&)\s*existing|existing\s*(?:and|&)\s*new)(?:\s+(?:users?|customers?))?\)\s*", " ", value, flags=re.I)
+    value = re.sub(r"\s*\(all\s+(?:[\w&.-]+\s+){0,3}(?:users?|customers?)\)\s*", " ", value, flags=re.I)
+    value = re.sub(r"\s+for\s+all\s+(?:[\w&.-]+\s+){0,3}(?:users?|customers?)\b", " ", value, flags=re.I)
+    value = re.sub(r"\s+for\s+(?:new|existing)\s+(?:users?|customers?)\b", " ", value, flags=re.I)
+    value = re.sub(
+        r"(?:,?\s*(?:up\s*to|maximum\s+cashback(?:\s+amount)?|cashback\s+(?:cap|capped))\s*(?:of\s+|at\s+)?(?:₹|rs\.?|inr)\s*\d[\d,]*(?:\.\d+)?)",
+        " ", value, flags=re.I)
+    value = re.sub(
+        r"(?:,?\s*(?:minimum\s+(?:order|purchase)\s+(?:value|amount)?|min\.?\s*order|mov)\s*(?:of\s+|at\s+)?(?:₹|rs\.?|inr)\s*\d[\d,]*(?:\.\d+)?)",
+        " ", value, flags=re.I)
+    return re.sub(r"\s+", " ", value).strip(" .,:;-|")
+
+
+def _parse_natural_rate_sheet(lines):
+    rows, pending = [], None
+    cap_pattern = r"(?:up\s*to|maximum\s+cashback(?:\s+amount)?|cashback\s+(?:cap|capped))"
+    mov_pattern = r"(?:minimum\s+(?:order|purchase)\s+(?:value|amount)?|min\.?\s*order|mov)"
+    for line in lines:
+        if _looks_like_rate(line):
+            if pending:
+                rows.append({**pending, "category": "", "source_text": pending["rate_source"]})
+            value_type, value = parse_rate_token(line)
+            pending = {"value_type": value_type, "value": value, "rate_source": line}
+            continue
+        inline = re.match(
+            r"^\s*((?:(?:₹|rs\.?|inr)\s*)?\d[\d,]*(?:\.\d+)?\s*%?)\s+(.+)$",
+            line, re.I)
+        if inline:
+            value_type, value = parse_rate_token(inline.group(1))
+            rate = {"value_type": value_type, "value": value, "rate_source": inline.group(1)}
+            description = inline.group(2)
+        elif pending:
+            rate, description = pending, line
+            pending = None
+        else:
+            rows.append({"category": _natural_category_text(line), "source_text": line,
+                         "customer_type": _customer_type_from_text(line)})
+            continue
+        rows.append({
+            "category": _natural_category_text(description),
+            "customer_type": _customer_type_from_text(description),
+            "value_type": rate.get("value_type"), "value": rate.get("value"),
+            "mov": _extract_amount(description, mov_pattern),
+            "cap": _extract_amount(description, cap_pattern),
+            "source_text": f'{rate.get("rate_source", "")} {description}'.strip(),
+        })
+    if pending:
+        rows.append({**pending, "category": "", "source_text": pending["rate_source"]})
+    return rows
+
+
+def parse_paste(raw: str, default_customer_type="existing"):
+    """Parse legacy spreadsheet rows or generic natural-language partner rate sheets."""
+    lines = [line.strip() for line in (raw or "").replace("\r", "").split("\n") if line.strip()]
     if not lines:
-        return rows
-    def split_line(l):
-        if "\t" in l:
-            return [c.strip() for c in l.split("\t")]
-        if "|" in l:
-            return [c.strip() for c in l.split("|")]
-        return [c.strip() for c in l.split(",")]
+        return []
+
+    def split_line(line):
+        if "\t" in line:
+            return [cell.strip() for cell in line.split("\t")]
+        if "|" in line:
+            return [cell.strip() for cell in line.split("|")]
+        return [cell.strip() for cell in line.split(",")]
+
     header = split_line(lines[0])
-    hl = [h.lower() for h in header]
-    has_header = any(k in " ".join(hl) for k in ("category", "rate", "new", "existing", "type", "mov", "cap"))
-    start = 1 if has_header else 0
-    # column index map
+    header_pattern = re.compile(
+        r"^(?:category|new(?:\s+rate)?|existing(?:\s+rate)?|rate|type|user\s+type|customer\s+type|"
+        r"mov|minimum(?:\s+order(?:\s+value)?)?|cap|maximum(?:\s+cashback(?:\s+amount)?|\s+eligible(?:\s+amount)?)?|"
+        r"valid\s+from|valid\s+until|from|until|to|notes?)$", re.I)
+    has_header = any(header_pattern.fullmatch(cell.strip()) for cell in header)
+    natural = (not has_header and
+               (_looks_like_rate(lines[0]) or any(re.search(r"\b(?:cashback|rewards?)\s+on\b", line, re.I)
+                                                  for line in lines)))
+    if natural:
+        return _parse_natural_rate_sheet(lines)
+
     idx = {}
     if has_header:
-        for i, h in enumerate(hl):
-            if "categor" in h:
+        for i, heading in enumerate(cell.lower() for cell in header):
+            if "categor" in heading:
                 idx["category"] = i
-            elif "new" in h:
+            elif "customer" in heading or "user type" in heading:
+                idx["customer_type"] = i
+            elif "new" in heading:
                 idx["new"] = i
-            elif "existing" in h or ("rate" in h and "new" not in h):
+            elif "existing" in heading:
                 idx["existing"] = i
-            elif h == "type":
+            elif "rate" in heading and "new" not in heading:
+                idx["rate"] = i
+            elif heading == "type":
                 idx["type"] = i
-            elif "mov" in h or "minimum" in h:
+            elif "mov" in heading or "minimum" in heading:
                 idx["mov"] = i
-            elif "cap" in h or "max" in h:
+            elif "cap" in heading or "max" in heading:
                 idx["cap"] = i
-            elif "from" in h:
+            elif "from" in heading:
                 idx["valid_from"] = i
-            elif "until" in h or "to" == h:
+            elif "until" in heading or heading == "to":
                 idx["valid_until"] = i
-            elif "note" in h:
+            elif "note" in heading:
                 idx["notes"] = i
-    for line in lines[start:]:
+
+    rows = []
+    for line in lines[1 if has_header else 0:]:
         cols = split_line(line)
         if not cols or not cols[0]:
             continue
-        if has_header:
-            def get(k):
-                i = idx.get(k)
-                return cols[i] if (i is not None and i < len(cols)) else None
-            rows.append({
-                "category": get("category") or cols[0],
-                "new": get("new"), "existing": get("existing"),
-                "type": get("type"), "mov": get("mov"), "cap": get("cap"),
-                "valid_from": get("valid_from"), "valid_until": get("valid_until"),
-                "notes": get("notes"),
-            })
+        if not has_header:
+            for customer_type, token in (("existing", cols[1] if len(cols) > 1 else None),
+                                         ("new", cols[2] if len(cols) > 2 else None)):
+                if token:
+                    value_type, value = parse_rate_token(token)
+                    rows.append({"category": cols[0], "customer_type": customer_type,
+                                 "value_type": value_type, "value": value, "source_text": line})
+            if len(cols) == 1:
+                rows.append({"category": cols[0], "customer_type": default_customer_type,
+                             "source_text": line})
+            continue
+
+        def get(key):
+            index = idx.get(key)
+            return cols[index] if index is not None and index < len(cols) else None
+
+        common = {"category": get("category") or cols[0], "mov": get("mov"), "cap": get("cap"),
+                  "valid_from": get("valid_from"), "valid_until": get("valid_until"),
+                  "notes": get("notes"), "source_text": line}
+        typed_rates = [("new", get("new")), ("existing", get("existing"))]
+        if any(token for _, token in typed_rates):
+            for customer_type, token in typed_rates:
+                if token:
+                    value_type, value = parse_rate_token(token, get("type") or "percent")
+                    rows.append({**common, "customer_type": customer_type,
+                                 "value_type": value_type, "value": value})
         else:
-            rows.append({"category": cols[0],
-                         "existing": cols[1] if len(cols) > 1 else None,
-                         "new": cols[2] if len(cols) > 2 else None})
+            token = get("rate")
+            value_type, value = parse_rate_token(token, get("type") or "percent")
+            customer_type = (get("customer_type") or default_customer_type).strip().lower()
+            rows.append({**common, "customer_type": customer_type,
+                         "value_type": value_type, "value": value})
     return rows
+
+
+def _norm_category(value):
+    return re.sub(r"\s+", " ", (value or "").replace("–", "-").replace("—", "-")).strip().casefold()
+
+
+def _top_level_categories(expression):
+    value = re.sub(r"\s*(?:&|and)\s+(everything\s+else|all\s+other\s+categories)\b",
+                   r" | \1", expression or "", flags=re.I)
+    parts, current, depth, had_comma = [], [], 0, False
+    for char in value:
+        if char == "(":
+            depth += 1
+        elif char == ")" and depth:
+            depth -= 1
+        if depth == 0 and char in "|,":
+            parts.append("".join(current).strip())
+            current = []
+            had_comma = had_comma or char == ","
+        else:
+            current.append(char)
+    parts.append("".join(current).strip())
+    return [part for part in parts if part], had_comma
+
+
+def _expand_category_expression(expression, known_names):
+    wildcard = re.compile(r"^(?:everything\s+else|all\s+other\s+categories|categories\s+not\s+otherwise\s+specified)$", re.I)
+    known = {_norm_category(name) for name in known_names}
+    parts, had_comma = _top_level_categories(expression)
+    expanded = []
+    for part in parts:
+        part = re.sub(r"^(?:and\s+)", "", part, flags=re.I).strip()
+        if wildcard.fullmatch(part):
+            expanded.append("All")
+            continue
+        grouped = re.fullmatch(r"(.+?)\s*\(([^()]+)\)", part)
+        if grouped:
+            base, children = grouped.group(1).strip(), grouped.group(2).strip()
+            if _norm_category(part) in known:
+                expanded.append(part)
+                continue
+            child_parts = [child.strip() for child in children.split(",") if child.strip()]
+            expanded.extend(f"{base} - {child}" for child in child_parts)
+            continue
+        if had_comma and " and " in part.lower() and _norm_category(part) not in known:
+            expanded.extend(piece.strip() for piece in re.split(r"\s+and\s+", part, flags=re.I) if piece.strip())
+        else:
+            expanded.append(part)
+    return expanded
+
+
+async def _rate_category_options(store_id):
+    global_categories = await db.categories.find({"archived_at": None}, {"_id": 0}).to_list(1000)
+    store_rates = await db.rate_cards.find(
+        {"store_id": store_id, "archived_at": None},
+        {"_id": 0, "category_id": 1, "category_name": 1}).to_list(3000)
+    options = list(global_categories)
+    known_ids = {(row.get("id"), _norm_category(row.get("name"))) for row in options}
+    for rate in store_rates:
+        candidate = (rate.get("category_id"), _norm_category(rate.get("category_name")))
+        if candidate[0] and candidate[1] and candidate not in known_ids:
+            options.append({"id": candidate[0], "name": rate["category_name"]})
+            known_ids.add(candidate)
+    return options
+
+
+def _same_import_value(field, incoming, existing):
+    current = existing.get(field)
+    if field in ("value", "minimum_order_value", "maximum_eligible_amount", "maximum_cashback_amount"):
+        if incoming in (None, "") and current in (None, ""):
+            return True
+        if incoming in (None, "") or current in (None, ""):
+            return False
+        return D(incoming) == D(current)
+    return (incoming or None) == (current or None)
+
+
+def _previous_rate_label(rate):
+    if not rate:
+        return None
+    prefix = "" if rate.get("value_type") == "percent" else "₹"
+    suffix = "%" if rate.get("value_type") == "percent" else ""
+    return f'{prefix}{rate.get("value")}{suffix}'
 
 
 @api.post("/admin/rates/import/preview")
@@ -1981,51 +2187,116 @@ async def import_preview(body: dict, user=Depends(require_write)):
     if not (store and plat):
         raise HTTPException(400, "Store and platform required")
     customer_type = body.get("customer_type", "existing")
-    cats = await db.categories.find({"archived_at": None}, {"_id": 0}).to_list(500)
-    cat_by_name = {c["name"].lower(): c for c in cats}
+    cats = await _rate_category_options(store["id"])
+    cats_by_name = {}
+    for category in cats:
+        cats_by_name.setdefault(_norm_category(category["name"]), []).append(category)
     raw = body.get("raw") or ""
-    parsed = parse_paste(raw) if isinstance(raw, str) else raw
+    parsed = parse_paste(raw, customer_type) if isinstance(raw, str) else raw
     existing_rates = await db.rate_cards.find({
-        "store_id": store["id"], "platform_id": plat["id"], "customer_type": customer_type,
+        "store_id": store["id"], "platform_id": plat["id"],
         "status": "published", "archived_at": None,
     }, {"_id": 0}).to_list(2000)
-    existing_by_cat = {r["category_name"].lower(): r for r in existing_rates}
+    existing_by_key = {}
+    for rate in existing_rates:
+        key = (rate.get("category_id"), rate.get("customer_type", "both"))
+        existing_by_key.setdefault(key, []).append(rate)
 
     preview = []
     for row in parsed:
-        cat_name = (row.get("category") or "").strip()
-        token = row.get(customer_type) or row.get("existing") or row.get("new")
-        vtype, value = parse_rate_token(token or "", body.get("value_type", "percent"))
-        item = {"input_category": cat_name, "value_type": vtype, "value": value,
-                "mov": row.get("mov"), "cap": row.get("cap"),
-                "valid_from": row.get("valid_from"), "valid_until": row.get("valid_until"),
-                "notes": row.get("notes")}
-        matched = cat_by_name.get(cat_name.lower())
-        if not cat_name:
-            item["status"] = "invalid"; item["reason"] = "Missing category"
-        elif value in (None, "") or D(value) < 0:
-            item["status"] = "invalid"; item["reason"] = "Invalid rate value"
-            item["matched_category"] = matched["name"] if matched else None
-        elif not matched:
-            # suggest close match
-            suggestion = next((c["name"] for c in cats if cat_name.lower() in c["name"].lower()
-                               or c["name"].lower() in cat_name.lower()), None)
-            item["status"] = "unmatched"; item["suggestion"] = suggestion
-        else:
-            item["matched_category"] = matched["name"]
-            item["category_id"] = matched["id"]
-            prev = existing_by_cat.get(matched["name"].lower())
-            if prev is None:
-                item["status"] = "new"
-            elif prev["value"] == str(value) and prev["value_type"] == vtype:
-                item["status"] = "unchanged"; item["previous_value"] = prev["value"]
-            else:
-                item["status"] = "changed"; item["previous_value"] = f"{prev['value']} ({prev['value_type']})"
-        preview.append(item)
+        input_category = (row.get("category") or "").strip()
+        expanded = _expand_category_expression(input_category, [category["name"] for category in cats]) or [""]
+        for cat_name in expanded:
+            row_customer_type = (row.get("customer_type") or customer_type).strip().lower()
+            value_type = row.get("value_type")
+            value = row.get("value")
+            if value is None and row.get(row_customer_type):
+                value_type, value = parse_rate_token(row[row_customer_type], body.get("value_type", "percent"))
+            cap = row.get("cap")
+            max_cashback = row.get("maximum_cashback_amount")
+            max_eligible = row.get("maximum_eligible_amount")
+            if cap not in (None, ""):
+                if plat.get("kind") == "affiliate":
+                    max_cashback = parse_rate_token(cap, "flat_amount")[1]
+                else:
+                    max_eligible = parse_rate_token(cap, "flat_amount")[1]
+            item = {
+                "input_category": input_category, "category": cat_name,
+                "source_text": row.get("source_text") or input_category,
+                "customer_type": row_customer_type, "value_type": value_type, "value": value,
+                "mov": parse_rate_token(row.get("mov"), "flat_amount")[1] if row.get("mov") else None,
+                "maximum_cashback_amount": max_cashback,
+                "maximum_eligible_amount": max_eligible,
+                "valid_from": row.get("valid_from") or None, "valid_until": row.get("valid_until") or None,
+                "notes": row.get("notes") or None,
+            }
+            matches = cats_by_name.get(_norm_category(cat_name), [])
+            reason = None
+            if not cat_name:
+                reason = "Missing category description"
+            elif row_customer_type not in ("new", "existing", "both"):
+                reason = "User type must be New, Existing, or Both"
+            elif value in (None, "") or D(value) < 0:
+                reason = "Invalid rate value"
+            elif len(matches) != 1:
+                reason = ("No exact category match for the selected store"
+                          if not matches else "More than one category matches this label")
+            if reason:
+                item.update({"action": "NEEDS REVIEW", "status": "Needs review", "reason": reason})
+                preview.append(item)
+                continue
 
-    counts = {}
-    for p in preview:
-        counts[p["status"]] = counts.get(p["status"], 0) + 1
+            matched = matches[0]
+            item.update({"matched_category": matched["name"], "category": matched["name"],
+                         "category_id": matched["id"]})
+            previous_matches = existing_by_key.get((matched["id"], row_customer_type), [])
+            if len(previous_matches) > 1:
+                item.update({"action": "NEEDS REVIEW", "status": "Needs review",
+                             "reason": "Multiple current records already exist for this category and user type"})
+                preview.append(item)
+                continue
+            previous = previous_matches[0] if previous_matches else None
+            item["previous_rate"] = _previous_rate_label(previous)
+            if previous:
+                item["card_eligibility"] = previous.get("card_eligibility") or "no_card_requirement"
+                item["card_criteria"] = previous.get("card_criteria") or None
+                item["priority"] = int(previous.get("priority") or 0)
+            else:
+                item["card_eligibility"] = "no_card_requirement"
+                item["card_criteria"] = None
+                item["priority"] = 0
+            compare_fields = ("value_type", "value", "minimum_order_value",
+                              "maximum_eligible_amount", "maximum_cashback_amount",
+                              "valid_from", "valid_until", "notes")
+            incoming = {**item, "minimum_order_value": item.get("mov")}
+            if previous is None:
+                item.update({"action": "CREATE", "status": "Ready"})
+            elif all(_same_import_value(field, incoming.get(field), previous) for field in compare_fields):
+                item.update({"action": "UNCHANGED", "status": "No change"})
+            else:
+                item.update({"action": "UPDATE", "status": "Ready"})
+            preview.append(item)
+
+    duplicate_keys = {}
+    for item in preview:
+        if item.get("category_id") and item.get("customer_type"):
+            duplicate_keys.setdefault((item["category_id"], item["customer_type"]), []).append(item)
+    for duplicates in duplicate_keys.values():
+        if len(duplicates) > 1:
+            for item in duplicates:
+                item.update({"action": "NEEDS REVIEW", "status": "Needs review",
+                             "reason": "The pasted sheet contains duplicate rules for this category and user type"})
+
+    counts = {
+        "parsed_records": len(preview),
+        "new": sum(row.get("customer_type") == "new" for row in preview),
+        "existing": sum(row.get("customer_type") == "existing" for row in preview),
+        "both": sum(row.get("customer_type") == "both" for row in preview),
+        "create": sum(row.get("action") == "CREATE" for row in preview),
+        "update": sum(row.get("action") == "UPDATE" for row in preview),
+        "unchanged": sum(row.get("action") == "UNCHANGED" for row in preview),
+        "errors": sum(row.get("action") == "NEEDS REVIEW" for row in preview),
+    }
     return {"store": store["name"], "platform": plat["name"],
             "customer_type": customer_type, "rows": preview, "counts": counts}
 
@@ -2036,20 +2307,45 @@ async def import_publish(body: dict, request: Request, user=Depends(require_writ
     plat = await db.platforms.find_one({"id": body.get("platform_id")}, {"_id": 0})
     if not (store and plat):
         raise HTTPException(400, "Store and platform required")
-    customer_type = body.get("customer_type", "existing")
-    rows = body.get("rows") or []  # accepted rows from preview (new/changed)
-    accepted = [r for r in rows if r.get("status") in ("new", "changed") and r.get("category_id")]
+    default_customer_type = body.get("customer_type", "existing")
+    rows = body.get("rows") or []
+    accepted = [r for r in rows
+                if (r.get("action") in ("CREATE", "UPDATE") or r.get("status") in ("new", "changed"))
+                and r.get("category_id")]
     if not accepted:
         raise HTTPException(400, "No valid rows to publish")
+
+    category_options = await _rate_category_options(store["id"])
+    valid_categories = {(category["id"], _norm_category(category["name"])) for category in category_options}
+    accepted_keys = set()
+    for row in accepted:
+        row_customer_type = (row.get("customer_type") or default_customer_type).lower()
+        key = (row.get("category_id"), row_customer_type)
+        if row_customer_type not in ("new", "existing", "both"):
+            raise HTTPException(400, "Invalid customer type in preview rows")
+        if (row.get("category_id"), _norm_category(row.get("matched_category") or row.get("category"))) not in valid_categories:
+            raise HTTPException(400, "A preview category is no longer valid")
+        if key in accepted_keys:
+            raise HTTPException(400, "Duplicate category and customer type in preview rows")
+        accepted_keys.add(key)
+        _validate_rate_body({
+            "value": row.get("value"), "minimum_order_value": row.get("mov"),
+            "maximum_eligible_amount": row.get("maximum_eligible_amount"),
+            "maximum_cashback_amount": row.get("maximum_cashback_amount"),
+            "valid_from": row.get("valid_from"), "valid_until": row.get("valid_until"),
+            "card_eligibility": row.get("card_eligibility") or "no_card_requirement",
+            "card_criteria": row.get("card_criteria"),
+        })
 
     batch_id = str(uuid.uuid4())
     superseded_ids = []
     inserted_ids = []
     for r in accepted:
+        row_customer_type = (r.get("customer_type") or default_customer_type).lower()
         # archive existing published rate for same dimensions
         existing = await db.rate_cards.find_one({
             "store_id": store["id"], "platform_id": plat["id"],
-            "category_id": r["category_id"], "customer_type": customer_type,
+            "category_id": r["category_id"], "customer_type": row_customer_type,
             "status": "published", "archived_at": None,
         })
         if existing:
@@ -2060,13 +2356,17 @@ async def import_publish(body: dict, request: Request, user=Depends(require_writ
             "id": str(uuid.uuid4()),
             "platform_id": plat["id"], "platform_name": plat["name"], "platform_kind": plat["kind"],
             "store_id": store["id"], "store_name": store["name"],
-            "category_id": r["category_id"], "category_name": r.get("matched_category"),
-            "customer_type": customer_type,
+            "category_id": r["category_id"], "category_name": r.get("matched_category") or r.get("category"),
+            "customer_type": row_customer_type,
             "value_type": r.get("value_type", "percent"), "value": str(r.get("value")),
             "minimum_order_value": (str(r["mov"]) if r.get("mov") not in (None, "") else None),
-            "maximum_eligible_amount": (str(r["cap"]) if r.get("cap") not in (None, "") else None),
+            "maximum_eligible_amount": (str(r["maximum_eligible_amount"]) if r.get("maximum_eligible_amount") not in (None, "") else None),
+            "maximum_cashback_amount": (str(r["maximum_cashback_amount"]) if r.get("maximum_cashback_amount") not in (None, "") else None),
             "valid_from": r.get("valid_from"), "valid_until": r.get("valid_until"),
-            "priority": 0, "notes": r.get("notes"), "active": True, "status": "published",
+            "card_eligibility": r.get("card_eligibility") or "no_card_requirement",
+            "card_criteria": r.get("card_criteria") or None,
+            "priority": int(r.get("priority") or 0), "notes": r.get("notes"),
+            "active": True, "status": "published",
             "import_batch_id": batch_id, "archived_at": None,
             "created_by": user["email"], "updated_by": user["email"],
             "created_at": now_iso(), "updated_at": now_iso(),
@@ -2074,11 +2374,14 @@ async def import_publish(body: dict, request: Request, user=Depends(require_writ
         await db.rate_cards.insert_one(dict(doc))
         inserted_ids.append(doc["id"])
 
+    customer_types = sorted({(row.get("customer_type") or default_customer_type).lower() for row in accepted})
     imp = {"id": batch_id, "store_id": store["id"], "platform_id": plat["id"],
-           "customer_type": customer_type, "status": "published",
+           "customer_type": customer_types[0] if len(customer_types) == 1 else "mixed",
+           "customer_types": customer_types, "status": "published",
            "actor": user["email"], "row_count": len(accepted),
            "inserted_ids": inserted_ids, "superseded_ids": superseded_ids,
-           "rejected": [r for r in rows if r.get("status") in ("invalid", "unmatched")],
+           "rejected": [r for r in rows if r.get("action") == "NEEDS REVIEW"
+                        or r.get("status") in ("invalid", "unmatched")],
            "created_at": now_iso()}
     await db.rate_imports.insert_one(dict(imp))
     await audit(user, "import_publish", "rate_import", batch_id, None,
@@ -2127,7 +2430,9 @@ async def rate_matrix(store_id: str, platform_id: str, customer_type: str = "exi
             "value": r["value"] if r else None,
             "value_type": r["value_type"] if r else "percent",
             "mov": r.get("minimum_order_value") if r else None,
-            "cap": r.get("maximum_eligible_amount") if r else None,
+            "cap": (r.get("maximum_cashback_amount") if r and r.get("platform_kind") == "affiliate"
+                    else r.get("maximum_eligible_amount") if r else None),
+            "cap_type": ("cashback" if r and r.get("platform_kind") == "affiliate" else "eligible_spend"),
             "valid_from": r.get("valid_from") if r else None,
             "valid_until": r.get("valid_until") if r else None,
             "active": r.get("active") if r else False,
