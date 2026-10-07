@@ -18,6 +18,45 @@ const AssetFallback = ({ label, className = "" }) => (
   </div>
 );
 
+const StoreSavingsCard = ({ store }) => {
+  const image = store.logo_url || store.image_url || getBrandAsset(store.name);
+  const slug = store.name.toLowerCase().replace(/[^a-z]+/g, "-");
+  const destination = store.slug
+    ? `/stores/${encodeURIComponent(store.slug)}`
+    : `/brands?store=${encodeURIComponent(store.name)}`;
+
+  return (
+    <Link to={destination} data-testid={`brand-${slug}`}
+      className="surface focus-ring group flex min-h-[17rem] flex-col overflow-hidden rounded-lg text-center text-ink transition-[border-color,transform] duration-200 hover:-translate-y-0.5 hover:border-gold/50">
+      <span className="sr-only">Explore savings at {store.name}</span>
+      <div className="flex min-h-12 items-center justify-center px-4 pt-4" data-testid={`brand-${slug}-promo-top`}>
+        {store.promo_top_text && (
+          <p className="line-clamp-2 break-words text-[11px] font-700 uppercase leading-4 text-gold">
+            {store.promo_top_text}
+          </p>
+        )}
+      </div>
+      <div className="flex flex-1 items-center justify-center px-5 py-4">
+        <div className="grid h-24 w-full max-w-[11rem] place-items-center overflow-hidden rounded-lg bg-white/95 p-3" data-testid={`brand-${slug}-logo`}>
+          {image ? (
+            <img src={image} alt={`${store.name} logo`} className="h-full w-full object-contain" loading="lazy" />
+          ) : (
+            <AssetFallback label={store.name} className="h-full w-full border-0 bg-transparent text-2xl" />
+          )}
+        </div>
+      </div>
+      <div className="mx-4 h-px bg-[var(--hairline)]" aria-hidden="true" data-testid={`brand-${slug}-divider`} />
+      <div className="flex min-h-16 items-center justify-center px-4 py-3" data-testid={`brand-${slug}-promo-bottom`}>
+        {store.promo_bottom_text && (
+          <p className="line-clamp-2 break-words text-sm font-700 leading-5 text-ink transition-colors group-hover:text-gold">
+            {store.promo_bottom_text}
+          </p>
+        )}
+      </div>
+    </Link>
+  );
+};
+
 export default function Home() {
   const bootstrap = useHomeBootstrap();
   const [result, setResult] = useState(null);
@@ -148,25 +187,10 @@ export default function Home() {
             View All <ArrowRight className="h-4 w-4" />
           </Link>
         </div>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-          {homepageStores.slice(0, 5).map((store) => {
-            const image = store.logo_url || store.image_url || getBrandAsset(store.name);
-            return (
-              <Link key={store.id} to={store.slug ? `/stores/${encodeURIComponent(store.slug)}` : `/brands?store=${encodeURIComponent(store.name)}`}
-                data-testid={`brand-${store.name.toLowerCase().replace(/[^a-z]+/g, "-")}`}
-                className="surface flex min-h-32 flex-col items-center justify-center gap-2 rounded-xl px-3 py-4 text-center text-sm font-600 text-ink transition-colors hover:border-gold/40 hover:text-gold">
-                <div className="h-12 w-28 max-w-full overflow-hidden rounded-lg bg-white/95 p-1.5">
-                  {image ? (
-                    <img src={image} alt={`${store.name} logo`} className="h-full w-full object-contain" loading="lazy" />
-                  ) : (
-                    <AssetFallback label={store.name} className="h-full w-full" />
-                  )}
-                </div>
-                <span>{store.name}</span>
-                {store.description && <span className="line-clamp-2 text-xs font-normal text-ink-muted">{store.description}</span>}
-              </Link>
-            );
-          })}
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5" data-testid="save-by-store-grid">
+          {homepageStores.slice(0, 5).map((store) => (
+            <StoreSavingsCard key={store.id} store={store} />
+          ))}
         </div>
       </section>
 

@@ -944,7 +944,8 @@ def public_filter():
 
 STORE_PUBLIC_DETAIL_FIELDS = {"_id": 0, "id": 1, "name": 1, "slug": 1, "store_url": 1,
                               "logo_url": 1, "image_url": 1, "description": 1,
-                              "display_rank": 1, "featured": 1}
+                              "display_rank": 1, "featured": 1,
+                              "promo_top_text": 1, "promo_bottom_text": 1}
 
 
 _CATEGORY_GROUP_RULE_FIELDS = (
@@ -1665,6 +1666,17 @@ async def delete_affiliate_destination(mid: str, request: Request, user=Depends(
 
 
 # ---- Stores + settings ----
+def _store_promo_text(value, field, max_length):
+    if value in (None, ""):
+        return None
+    if not isinstance(value, str):
+        raise HTTPException(400, f"{field} must be text")
+    cleaned = re.sub(r"\s+", " ", value).strip()
+    if len(cleaned) > max_length:
+        raise HTTPException(400, f"{field} must be {max_length} characters or fewer")
+    return cleaned or None
+
+
 @api.get("/admin/stores")
 async def admin_stores(user=Depends(require_any_role)):
     return await db.stores.find({}, {"_id": 0}).sort([("display_rank", 1), ("name", 1)]).to_list(500)
@@ -1694,6 +1706,8 @@ async def create_store(body: dict, request: Request, user=Depends(require_write)
            "logo_url": body.get("logo_url"),
            "image_url": body.get("image_url"),
            "description": body.get("description"),
+           "promo_top_text": _store_promo_text(body.get("promo_top_text"), "promo_top_text", 80),
+           "promo_bottom_text": _store_promo_text(body.get("promo_bottom_text"), "promo_bottom_text", 120),
            "homepage_visible": bool(body.get("homepage_visible", True)),
            "featured": bool(body.get("featured", False)),
            "archived_at": None, "created_at": now_iso(), "updated_at": now_iso()}
@@ -1710,7 +1724,11 @@ async def update_store(sid_: str, body: dict, request: Request, user=Depends(req
     upd = {k: body[k] for k in ("name", "active", "stacking", "stacking_note",
                                 "store_url", "split_payment_supported",
                                 "display_rank", "logo_url", "image_url",
-                                "description", "homepage_visible", "featured") if k in body}
+                                "description", "homepage_visible", "featured",
+                                "promo_top_text", "promo_bottom_text") if k in body}
+    for field, max_length in (("promo_top_text", 80), ("promo_bottom_text", 120)):
+        if field in upd:
+            upd[field] = _store_promo_text(upd[field], field, max_length)
     if body.get("slug"):
         upd["slug"] = await _unique_store_slug(body["slug"], exclude_id=sid_)
     if "display_rank" in upd:

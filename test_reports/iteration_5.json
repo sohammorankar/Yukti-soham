@@ -1,0 +1,58 @@
+{
+  "summary": "Focused Phase-2 Premium Save-by-Store validation completed (static + compile/build + live smoke). Backend promo normalization/length constraints and additive field wiring passed in targeted pytest; frontend live integration checks remain blocked by preview wake-up shell.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "Public homepage shell",
+        "issue": "App stays on 'YuktiCart is still waking up...' so Save by Store cards never render for live selector/assertion checks.",
+        "selector": "text=YuktiCart is still waking up",
+        "priority": "HIGH"
+      }
+    ],
+    "integration_issues": [
+      {
+        "flow": "Homepage Save by Store API-to-UI render",
+        "issue": "Live runtime blocked before Home content mounts; could not verify card count/equal heights/divider/mobile overflow against real API response.",
+        "affected_selectors": [
+          "[data-testid=save-by-store-grid]",
+          "[data-testid^=brand-]",
+          "[data-testid$='-promo-top']",
+          "[data-testid$='-promo-bottom']"
+        ]
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_phase2_store_promo_redesign.py",
+    "/app/test_reports/pytest/pytest_phase2_store_promo_redesign.xml"
+  ],
+  "action_items": [
+    "Fix preview availability/warm-up so homepage mounts and Save by Store cards are testable live.",
+    "After preview is up, rerun Playwright on real API data to confirm: 5 equal-height cards, larger centered logo, divider presence, empty promo slots blank, and no horizontal overflow at 390px.",
+    "Provide/restore frontend REACT_APP_BACKEND_URL runtime configuration source if intentionally removed from file-based env flow."
+  ],
+  "critical_code_review_comments": [
+    "server.py correctly normalizes promo texts via _store_promo_text (trim + whitespace collapse + strict max lengths: 80/120) and stores None for empty values.",
+    "Public store detail projection includes promo_top_text/promo_bottom_text and public list query still enforces homepage_visible filter with display_rank/name ordering.",
+    "Home card wiring uses API fields only for promo text rendering (conditional blocks) and preserves logo_url/image_url/getBrandAsset fallback and slug/fallback destinations."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_phase2_store_promo_redesign.py",
+    "/app/test_reports/iteration_5.json"
+  ],
+  "success_rate": {
+    "backend": "100% (12/12 focused tests)",
+    "frontend": "Build pass; live integration validation blocked by wake-up shell"
+  },
+  "test_credentials": "owner@yukticart.com / YuktiOwner@2026",
+  "seed_data_creation": "None. No DB writes performed.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Added focused non-DB test suite at /app/backend/tests/test_phase2_store_promo_redesign.py validating promo normalization/lengths, backend projection/query contracts, admin field maxLength wiring, and Home card structure/fallback routing. py_compile and yarn build pass (pre-existing hook warnings). Live preview URL still stuck at wake-up shell, blocking runtime Save by Store assertions.",
+  "rca of the issue": "Repro: open https://cart-phase-audit.preview.emergentagent.com. Observed persistent wake-up screen and no transition to homepage, so selectors under save-by-store-grid never appear. Console confirms 404 calls to /undefined/api/health. Impact: cannot complete live API\u2194UI validation for card height/overflow/promo-empty states. Mitigation: restore preview readiness and REACT_APP_BACKEND_URL runtime wiring, then rerun targeted Playwright script."
+}

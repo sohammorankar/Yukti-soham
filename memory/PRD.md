@@ -85,6 +85,20 @@ secure server-side authz + audit; accessible responsive premium UI.
   one provider transport test to `delivered@resend.dev` passed. No production recipient test, data
   migration, seed, deployment or unrelated UI work was performed.
 
+## Implemented (2026-10-07) — Premium Save by Store Cards
+- Extended existing store documents with two optional presentation-only fields: `promo_top_text`
+  (80 characters) and `promo_bottom_text` (120 characters). Existing stores require no backfill;
+  missing/empty values remain `None` and render as blank stable card slots.
+- Reused the existing Stores admin dialog, store create/update/audit flow, public store endpoints,
+  `homepage_visible`, `display_rank`, `featured`, slug routing, `logo_url` / `image_url`, and shared
+  brand asset fallback. No CMS, collection, seed, record duplication or business-logic coupling.
+- Homepage Save by Store cards now use the requested top text → dominant centered logo → thin divider
+  → bottom savings text hierarchy with consistent height, restrained hover treatment and responsive
+  one/two/three/five-column layout.
+- Focused verification: 12/12 non-DB tests, Python compile, frontend build, and isolated desktop/mobile
+  rendering checks passed. Existing links, blank promo fallbacks, equal card heights, large logos,
+  mobile no-overflow and admin controls were verified with mocked API responses.
+
 ## Backlog (prioritized)
 - **P1:** MFA for admins; email verification flow; password reset UI; recent-login reauth for role
   changes. Full keyboard cell editing / multi-select / fill-down in the Rate Matrix grid.

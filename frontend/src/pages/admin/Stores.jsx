@@ -7,7 +7,7 @@ import {
 } from "@/components/ui/dialog";
 import { useMeta } from "@/lib/useMeta";
 
-const empty = { name: "", stacking: "unsure", split_payment_supported: "unsure", stacking_note: "", slug: "", display_rank: "", logo_url: "", image_url: "", description: "", homepage_visible: true, featured: false };
+const empty = { name: "", stacking: "unsure", split_payment_supported: "unsure", stacking_note: "", slug: "", display_rank: "", logo_url: "", image_url: "", description: "", promo_top_text: "", promo_bottom_text: "", homepage_visible: true, featured: false };
 
 export default function Stores() {
   useMeta("Stores · Console", "");
@@ -30,7 +30,7 @@ export default function Stores() {
   };
   const archive = async (id) => { await api.delete(`/admin/stores/${id}`); toast.success("Archived"); load(); };
   const restore = async (id) => { await api.post(`/admin/stores/${id}/restore`); toast.success("Restored"); load(); };
-  const edit = (r) => { setForm({ name: r.name, stacking: r.stacking, split_payment_supported: r.split_payment_supported, stacking_note: r.stacking_note || "", slug: r.slug || "", display_rank: r.display_rank ?? "", logo_url: r.logo_url || "", image_url: r.image_url || "", description: r.description || "", homepage_visible: r.homepage_visible !== false, featured: !!r.featured }); setEditId(r.id); setOpen(true); };
+  const edit = (r) => { setForm({ name: r.name, stacking: r.stacking, split_payment_supported: r.split_payment_supported, stacking_note: r.stacking_note || "", slug: r.slug || "", display_rank: r.display_rank ?? "", logo_url: r.logo_url || "", image_url: r.image_url || "", description: r.description || "", promo_top_text: r.promo_top_text || "", promo_bottom_text: r.promo_bottom_text || "", homepage_visible: r.homepage_visible !== false, featured: !!r.featured }); setEditId(r.id); setOpen(true); };
 
   return (
     <div className="mx-auto max-w-4xl">
@@ -45,7 +45,7 @@ export default function Stores() {
               <Plus className="h-4 w-4" /> Add store
             </button>
           </DialogTrigger>
-          <DialogContent>
+          <DialogContent className="max-h-[90vh] overflow-y-auto">
             <DialogHeader><DialogTitle>{editId ? "Edit store & settings" : "Add store"}</DialogTitle></DialogHeader>
             <div className="space-y-3">
               <Field label="Name"><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} data-testid="store-name" className="in" /></Field>
@@ -79,6 +79,14 @@ export default function Stores() {
               <Field label="Description (optional)">
                 <textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={2} data-testid="store-description" className="in" style={{ height: "auto", padding: ".5rem .75rem" }} />
               </Field>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Card top text (optional)" help="Campaign or promotional heading · 80 characters max">
+                  <input maxLength={80} value={form.promo_top_text} onChange={(e) => setForm({ ...form, promo_top_text: e.target.value })} data-testid="store-promo-top-text" className="in" />
+                </Field>
+                <Field label="Card bottom text (optional)" help="Savings or promotional line · 120 characters max">
+                  <input maxLength={120} value={form.promo_bottom_text} onChange={(e) => setForm({ ...form, promo_bottom_text: e.target.value })} data-testid="store-promo-bottom-text" className="in" />
+                </Field>
+              </div>
               <div className="grid grid-cols-2 gap-3">
                 <Field label="Homepage visible">
                   <select value={form.homepage_visible ? "yes" : "no"} onChange={(e) => setForm({ ...form, homepage_visible: e.target.value === "yes" })} data-testid="store-homepage-visible" className="in">
