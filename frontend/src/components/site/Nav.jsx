@@ -1,9 +1,11 @@
 import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Menu, X, Palette, LogIn, LogOut, CreditCard, Search, LifeBuoy } from "lucide-react";
+import { Menu, X, Palette, LogIn, LogOut, CreditCard, Search, LifeBuoy, MessageCircle } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
 import { useAuth } from "@/context/AuthContext";
 import { Logo } from "@/components/site/Logo";
+
+const WHATSAPP_URL = `https://wa.me/919156968318?text=${encodeURIComponent("Hello YuktiCart Support, I need help.")}`;
 
 // Small avatar: shows the user's uploaded/linked image when present, otherwise a
 // clean initial fallback. Never renders any card/financial info.
@@ -78,6 +80,14 @@ export function Nav() {
             <LifeBuoy className="h-4 w-4 text-gold" /> Support
           </Link>
 
+          <a href={WHATSAPP_URL} target="_blank" rel="noreferrer"
+            data-testid="nav-whatsapp" title="Chat with YuktiCart Support on WhatsApp"
+            aria-label="Chat with YuktiCart Support on WhatsApp"
+            className="focus-ring hidden h-9 items-center gap-1.5 rounded-full border border-border px-2.5 text-sm text-ink-muted transition-colors hover:text-emerald-500 sm:inline-flex">
+            <MessageCircle className="h-4 w-4 text-emerald-500" />
+            <span className="hidden xl:inline">WhatsApp</span>
+          </a>
+
           {isAuthed ? (
             <div className="hidden items-center gap-2 lg:flex">
               <Link to="/account/cards" data-testid="nav-my-cards" title="My Cards & Offers"
@@ -130,6 +140,12 @@ export function Nav() {
           <div className="flex flex-col gap-1">
             <Link to="/contact" onClick={() => setOpen(false)} data-testid="nav-support-mobile"
               className="rounded-md px-3 py-2 text-sm text-ink-muted hover:text-gold">Support</Link>
+            <a href={WHATSAPP_URL} target="_blank" rel="noreferrer" data-testid="nav-whatsapp-mobile"
+              aria-label="Chat with YuktiCart Support on WhatsApp" title="Chat with YuktiCart Support on WhatsApp"
+              onClick={() => setOpen(false)}
+              className="flex items-center gap-2 rounded-md px-3 py-2 text-sm text-ink-muted hover:text-emerald-500">
+              <MessageCircle className="h-4 w-4 text-emerald-500" /> WhatsApp support
+            </a>
             <div className="my-1 border-t border-border" />
             {isAuthed ? (
               <>

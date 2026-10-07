@@ -55,8 +55,22 @@ secure server-side authz + audit; accessible responsive premium UI.
 - Focused verification: 15/15 Phase 1 parser/preview/cap/guardrail tests pass; frontend production
   build passes. No business data, collections, images, assets, or deployment were created.
 
+## Implemented (2026-10-07) — Shopper Category Grouping Phase 2
+- Public store responses now derive presentation-only category groups from currently active,
+  published affiliate rules. Group signatures cover both new and existing shopper contexts,
+  including compatible `both` rules, partner, value, MOV, caps, validity, priority, product and card
+  conditions. Gift-card rules never contribute.
+- The shopper selector and store pages show one grouped label only when complete rule profiles match.
+  Exact URL-detected categories remain the internal calculation value; manual multi-category group
+  selection requires an exact-category refinement instead of inventing a classification.
+- Internal wildcard `All` remains hidden while legitimate `All Footwear` remains visible.
+- Global navigation now includes accessible desktop/mobile WhatsApp support to +91 9156968318.
+  Contact and footer mail links consistently use `yukticart@gmail.com` while the existing feedback
+  endpoint remains unchanged.
+- Focused verification: 7/7 DB-write-free grouping/contact tests, Python compile, frontend production
+  build, and isolated shopper-flow smoke passed. No data, collections, assets, or deployment created.
+
 ## Backlog (prioritized)
-- **P1 / Phase 2:** Shopper-facing category grouping and presentation for expanded partner categories.
 - **P1:** MFA for admins; email verification flow; password reset UI; recent-login reauth for role
   changes. Full keyboard cell editing / multi-select / fill-down in the Rate Matrix grid.
 - **P2:** Draft→publish workflow surfaced in Matrix; per-store rate versioning UI; category

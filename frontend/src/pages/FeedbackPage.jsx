@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { PageShell } from "@/components/site/PageShell";
 import { api, formatApiErrorDetail } from "@/lib/api";
 import { toast } from "sonner";
-import { Send } from "lucide-react";
+import { Mail, Send } from "lucide-react";
 
 const CONFIG = {
   contact: { title: "Contact Us", kicker: "Company", desc: "Questions, partnerships or press — reach out and we'll reply to your email.", label: "Your message" },
@@ -29,6 +29,12 @@ export function FeedbackPage({ kind }) {
 
   return (
     <PageShell title={cfg.title} kicker={cfg.kicker} description={cfg.desc}>
+      {kind === "contact" && (
+        <a href="mailto:yukticart@gmail.com" data-testid="contact-email-link"
+          className="inline-flex items-center gap-2 text-sm text-gold hover:underline">
+          <Mail className="h-4 w-4" /> yukticart@gmail.com
+        </a>
+      )}
       {sent ? (
         <div className="surface rounded-xl p-6 text-center" data-testid="feedback-success">
           <p className="text-savings">Received! We'll get back to you at the email you provided.</p>

@@ -1,0 +1,56 @@
+{
+  "summary": "Focused Phase-2 testing completed. Backend-focused, DB-write-free grouping logic and public contact surface checks passed via MOCKED/read-only tests (7/7). Frontend production build passed with pre-existing hook warnings. Live UI integration on public preview is blocked by deployment wake-up gate and undefined backend env route behavior.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "Public preview shell",
+        "issue": "App remains on 'YuktiCart is still waking up...' and never renders Savings Engine, blocking selector-level UI validation.",
+        "selector": "[data-testid=\"savings-engine\"]",
+        "priority": "HIGH"
+      }
+    ],
+    "integration_issues": [
+      {
+        "flow": "Focused mocked UI checks for grouping + calculate payload",
+        "issue": "Could not execute end-to-end in browser because preview kept serving wake-up state; console showed requests to /undefined/api/health when REACT_APP_BACKEND_URL is absent in that deployment context.",
+        "affected_selectors": [
+          "[data-testid=\"savings-engine\"]",
+          "[data-testid=\"input-url\"]",
+          "[data-testid=\"btn-calculate\"]"
+        ]
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_phase2_affiliate_grouping.py",
+    "/app/test_reports/pytest/pytest_phase2_grouping.xml"
+  ],
+  "action_items": [
+    "Restore usable public runtime for this branch (preview currently stuck on wake-up page).",
+    "Ensure frontend deployment has REACT_APP_BACKEND_URL configured so '/undefined/api/health' is not requested.",
+    "After runtime is reachable, rerun focused Playwright validation for: grouped display label, exact category passthrough in /calculate payload, WhatsApp links/a11y labels, and contact/footer email links."
+  ],
+  "critical_code_review_comments": [
+    "server.py remains very large (1500+ lines) and should be split into routers/modules for maintainability and safer review/test scope.",
+    "Frontend build has existing react-hooks/exhaustive-deps warnings (including SavingsEngine runDetect effect); non-blocking for build but should be cleaned to reduce subtle behavior drift."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_phase2_affiliate_grouping.py",
+    "/app/test_reports/iteration_3.json"
+  ],
+  "success_rate": {
+    "backend": "100% (7/7 focused tests)",
+    "frontend": "Build pass; live focused runtime validation blocked"
+  },
+  "test_credentials": "owner@yukticart.com / YuktiOwner@2026",
+  "seed_data_creation": "None (MOCKED/read-only only).",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend focused assertions already added in /app/backend/tests/test_phase2_affiliate_grouping.py and passing. Includes: equivalent grouping merge/split, hidden internal All, preserved All Footwear, gift-card exclusion, both-rule participation, WhatsApp/mail source checks. Playwright attempts on public preview failed before app render because wake-up shell persisted; screenshot + console indicate '/undefined/api/health' path in that runtime.",
+  "rca of the issue": "Reproduction: open https://cart-phase-audit.preview.emergentagent.com and wait for homepage engine. Actual: persistent wake-up screen; [data-testid='savings-engine'] never appears. Console log shows 404 for /undefined/api/health in that deployment. Probable root cause: preview runtime health/bootstrap depends on configured backend URL and/or warm backend service; missing env/warm state prevents app bootstrap. Mitigation: configure REACT_APP_BACKEND_URL in deployment and warm/restart preview, then rerun focused UI script."
+}

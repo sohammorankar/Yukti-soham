@@ -29,8 +29,10 @@ export default function StorePage() {
     return () => { active = false; controller.abort(); };
   }, [slug, retry]);
 
-  const categories = Array.isArray(store?.categories)
-    ? store.categories.filter((category) => typeof category?.name === "string"
+  const categorySource = Array.isArray(store?.category_groups) && store.category_groups.length
+    ? store.category_groups : store?.categories;
+  const categories = Array.isArray(categorySource)
+    ? categorySource.filter((category) => typeof category?.name === "string"
       && category.name.trim() && category.name.trim().toLowerCase() !== "all")
     : [];
   const image = store && (store.logo_url || store.image_url || getBrandAsset(store.name));

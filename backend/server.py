@@ -925,6 +925,61 @@ STORE_PUBLIC_DETAIL_FIELDS = {"_id": 0, "id": 1, "name": 1, "slug": 1, "store_ur
                               "display_rank": 1, "featured": 1}
 
 
+_CATEGORY_GROUP_RULE_FIELDS = (
+    "platform_id", "value_type", "value", "minimum_order_value",
+    "maximum_cashback_amount", "maximum_eligible_amount",
+    "valid_from", "valid_until", "priority", "product_match",
+    "card_eligibility", "card_criteria",
+)
+
+
+def _category_group_value(value):
+    if isinstance(value, dict):
+        return tuple(sorted((key, _category_group_value(item)) for key, item in value.items()))
+    if isinstance(value, list):
+        return tuple(_category_group_value(item) for item in value)
+    return value
+
+
+def _category_group_rule_signature(rule):
+    values = []
+    card_mode = rule.get("card_eligibility") or "no_card_requirement"
+    for field in _CATEGORY_GROUP_RULE_FIELDS:
+        value = rule.get(field)
+        if field == "value_type":
+            value = value or "percent"
+        elif field == "maximum_cashback_amount":
+            value = value if value not in (None, "") else rule.get("cashback_cap_amount")
+        elif field == "priority":
+            value = value or 0
+        elif field == "product_match":
+            value = value or None
+        elif field == "card_eligibility":
+            value = card_mode
+        elif field == "card_criteria" and card_mode in ("no_card_requirement", "any_card"):
+            value = None
+        if field in ("value", "minimum_order_value", "maximum_cashback_amount",
+                     "maximum_eligible_amount", "priority") \
+                and value not in (None, ""):
+            decimal = format(D(value), "f")
+            value = decimal.rstrip("0").rstrip(".") if "." in decimal else decimal
+        values.append(_category_group_value(value))
+    return tuple(values)
+
+
+def _category_group_rule_is_current(rule, today):
+    def parsed(value):
+        if value in (None, ""):
+            return None
+        try:
+            return date.fromisoformat(str(value)[:10])
+        except ValueError:
+            return None
+
+    valid_from, valid_until = parsed(rule.get("valid_from")), parsed(rule.get("valid_until"))
+    return not ((valid_from and today < valid_from) or (valid_until and today > valid_until))
+
+
 async def _store_affiliate_summary(store_id: Optional[str] = None):
     """Public category choices and rule flags from one shared affiliate-rate filter.
 
@@ -936,10 +991,12 @@ async def _store_affiliate_summary(store_id: Optional[str] = None):
              "platform_kind": "affiliate"}
     if store_id is not None:
         query["store_id"] = store_id
-    category_flags, customer_type_flags, categories = {}, {}, {}
-    cur = db.rate_cards.find(
-        query, {"_id": 0, "store_id": 1, "category_name": 1, "customer_type": 1})
+    category_flags, customer_type_flags, categories, profiles = {}, {}, {}, {}
+    cur = db.rate_cards.find(query, {"_id": 0})
+    today = datetime.now(timezone.utc).date()
     async for rule in cur:
+        if not _category_group_rule_is_current(rule, today):
+            continue
         sid_ = rule.get("store_id")
         if not sid_:
             continue
@@ -947,9 +1004,30 @@ async def _store_affiliate_summary(store_id: Optional[str] = None):
         if name and name.casefold() != "all":
             category_flags[sid_] = True
             categories.setdefault(sid_, {}).setdefault(name.casefold(), {"name": name})
+            category_profile = profiles.setdefault(sid_, {}).setdefault(
+                name.casefold(), {"new": set(), "existing": set()})
+            customer_type = (rule.get("customer_type") or "both").strip().lower()
+            signature = _category_group_rule_signature(rule)
+            for context in ("new", "existing"):
+                if customer_type in ("both", context):
+                    category_profile[context].add(signature)
         if (rule.get("customer_type") or "both").strip().lower() != "both":
             customer_type_flags[sid_] = True
-    return category_flags, customer_type_flags, categories
+
+    category_groups = {}
+    for sid_, store_categories in categories.items():
+        equivalent = {}
+        for category_key, category in store_categories.items():
+            profile = profiles[sid_][category_key]
+            signature = (tuple(sorted(profile["new"], key=repr)),
+                         tuple(sorted(profile["existing"], key=repr)))
+            equivalent.setdefault(signature, []).append(category)
+        category_groups[sid_] = [
+            {"name": " | ".join(item["name"] for item in members),
+             "categories": members}
+            for members in equivalent.values()
+        ]
+    return category_flags, customer_type_flags, categories, category_groups
 
 
 @api.get("/public/stores")
@@ -965,7 +1043,7 @@ async def public_stores(homepage: bool = False, limit: int = 0):
         [("display_rank", 1), ("name", 1)]).to_list(500)
     if limit and limit > 0:
         stores = stores[:limit]
-    cat_flags, ctype_flags, _ = await _store_affiliate_summary()
+    cat_flags, ctype_flags, _, _ = await _store_affiliate_summary()
     for s in stores:
         s["has_category_rules"] = bool(cat_flags.get(s["id"]))
         s["has_customer_type_rules"] = bool(ctype_flags.get(s["id"]))
@@ -980,11 +1058,13 @@ async def public_store_detail(slug: str):
         STORE_PUBLIC_DETAIL_FIELDS)
     if not store:
         raise HTTPException(status_code=404, detail="Store not found")
-    cat_flags, ctype_flags, categories = await _store_affiliate_summary(store["id"])
+    cat_flags, ctype_flags, categories, category_groups = await _store_affiliate_summary(store["id"])
     store["has_category_rules"] = bool(cat_flags.get(store["id"]))
     store["has_customer_type_rules"] = bool(ctype_flags.get(store["id"]))
     store["categories"] = sorted(categories.get(store["id"], {}).values(),
                                  key=lambda category: category["name"].casefold())
+    store["category_groups"] = sorted(
+        category_groups.get(store["id"], []), key=lambda group: group["name"].casefold())
     return store
 
 
