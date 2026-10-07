@@ -130,7 +130,7 @@ export default function Matrix() {
           {/* Bulk paste */}
           <div className="surface mt-5 rounded-xl p-4">
             <div className="flex items-center gap-2 text-sm font-600 text-ink"><ClipboardPaste className="h-4 w-4 text-gold" /> Bulk paste</div>
-            <p className="mt-1 text-xs text-ink-muted">Paste natural partner text with alternating rate and cashback lines, or spreadsheet columns: Category | New | Existing | Type | MOV | Cap | Valid From | Valid Until | Notes.</p>
+            <p className="mt-1 text-xs text-ink-muted">Paste natural partner text with alternating rate and cashback lines, or spreadsheet columns: Category | New | Existing | Both | Type | MOV | Cap | Valid From | Valid Until | Notes. Use either Both or New/Existing on each row.</p>
             <textarea value={raw} onChange={(e) => setRaw(e.target.value)} rows={6} data-testid="matrix-paste"
               placeholder={"6%\nCashback on Home & Kitchen | Beauty and Personal Care (New Users)\n\n3%\nCashback on Home & Kitchen | Beauty and Personal Care (Existing Users)"}
               className="mt-3 w-full rounded-md border border-border bg-input p-3 font-mono text-sm text-foreground" />

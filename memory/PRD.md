@@ -70,6 +70,21 @@ secure server-side authz + audit; accessible responsive premium UI.
 - Focused verification: 7/7 DB-write-free grouping/contact tests, Python compile, frontend production
   build, and isolated shopper-flow smoke passed. No data, collections, assets, or deployment created.
 
+## Implemented (2026-10-07) — Contact Delivery + Import Semantics Phase 1A
+- Contact Us now requires a valid visitor email, persists through the existing `feedback` collection,
+  sends a fixed server-side YuktiCart notification through the managed Resend transport, and records
+  `pending` → `sent` or `failed` delivery state. Frontend success appears only after confirmed send.
+- Email recipient, sender name, key and owner-controlled Reply-To are backend environment settings;
+  user content is escaped and checked by a structural email safety gate. No frontend secret or new
+  persistence system was added.
+- Spreadsheet imports accept an optional explicit `Both` column. Both-only produces one `both` rule;
+  equal New/Existing values remain two rules; mixing Both with either typed column is NEEDS REVIEW.
+- Exact category matching, grouped expansion, visible source warnings, internal `All`, exact
+  `All Footwear`, publish filtering, history and rollback behavior remain intact.
+- Focused verification: 28/28 relevant tests, Python compile, frontend build, isolated UI rendering, and
+  one provider transport test to `delivered@resend.dev` passed. No production recipient test, data
+  migration, seed, deployment or unrelated UI work was performed.
+
 ## Backlog (prioritized)
 - **P1:** MFA for admins; email verification flow; password reset UI; recent-login reauth for role
   changes. Full keyboard cell editing / multi-select / fill-down in the Rate Matrix grid.

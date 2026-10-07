@@ -16,15 +16,23 @@ export function FeedbackPage({ kind }) {
   const [email, setEmail] = useState("");
   const [message, setMessage] = useState("");
   const [sent, setSent] = useState(false);
+  const [sending, setSending] = useState(false);
 
   const submit = async (e) => {
     e.preventDefault();
     if (!message.trim()) { toast.error("Please add a message"); return; }
+    if (kind === "contact" && !email.trim()) { toast.error("Please add your email"); return; }
+    setSending(true);
     try {
-      await api.post("/feedback", { kind, name, email: email || undefined, message });
+      const { data } = await api.post("/feedback", { kind, name, email: email || undefined, message });
+      if (kind === "contact" && data?.delivery_status !== "sent") {
+        throw new Error("Message delivery was not confirmed");
+      }
       setSent(true); setMessage(""); setName(""); setEmail("");
-      toast.success("Thank you — we've received your message.");
-    } catch (err) { toast.error(formatApiErrorDetail(err.response?.data?.detail)); }
+      toast.success(kind === "contact" ? "Your message was delivered to YuktiCart Support." : "Thank you — we've received your message.");
+    } catch (err) {
+      toast.error(formatApiErrorDetail(err.response?.data?.detail || err.message));
+    } finally { setSending(false); }
   };
 
   return (
@@ -50,7 +58,7 @@ export function FeedbackPage({ kind }) {
             </div>
             <div>
               <label className="mb-1.5 block text-xs font-600 uppercase tracking-wide text-ink-muted">Email</label>
-              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} data-testid="feedback-email"
+              <input type="email" required={kind === "contact"} value={email} onChange={(e) => setEmail(e.target.value)} data-testid="feedback-email"
                 className="focus-ring h-11 w-full rounded-md border border-border bg-input px-3 text-sm text-foreground" />
             </div>
           </div>
@@ -59,9 +67,9 @@ export function FeedbackPage({ kind }) {
             <textarea value={message} onChange={(e) => setMessage(e.target.value)} rows={5} data-testid="feedback-message"
               className="focus-ring w-full rounded-md border border-border bg-input p-3 text-sm text-foreground" />
           </div>
-          <button type="submit" data-testid="feedback-submit"
-            className="btn-gold focus-ring inline-flex items-center gap-2 rounded-full px-6 py-3 text-sm font-700">
-            <Send className="h-4 w-4" /> Send message
+          <button type="submit" disabled={sending} data-testid="feedback-submit"
+            className="btn-gold focus-ring inline-flex items-center gap-2 rounded-full px-6 py-3 text-sm font-700 disabled:opacity-50">
+            <Send className="h-4 w-4" /> {sending ? "Sending…" : "Send message"}
           </button>
         </form>
       )}
