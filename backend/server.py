@@ -1107,6 +1107,33 @@ async def public_homepage_categories():
     ).sort([("display_rank", 1), ("name", 1)]).to_list(100)
 
 
+@api.get("/public/homepage/categories/{slug}")
+async def public_homepage_category_detail(slug: str):
+    """One editorial category plus active visible stores with exact affiliate rules."""
+    projection = {"_id": 0, "id": 1, "name": 1, "slug": 1,
+                  "display_rank": 1, "image_url": 1}
+    category = await db.homepage_categories.find_one(
+        {"slug": (slug or "").strip().lower(), "active": True}, projection)
+    if not category or (category.get("name") or "").strip().casefold() == "all":
+        raise HTTPException(status_code=404, detail="Category not found")
+
+    rules = await db.rate_cards.find({
+        "category_name": re.compile(f'^{re.escape(category["name"])}$', re.I),
+        "platform_kind": "affiliate", "active": True,
+        "status": "published", "archived_at": None,
+    }, {"_id": 0, "store_id": 1, "valid_from": 1, "valid_until": 1}).to_list(3000)
+    today = datetime.now(timezone.utc).date()
+    store_ids = list({rule["store_id"] for rule in rules
+                      if rule.get("store_id") and _category_group_rule_is_current(rule, today)})
+    stores = []
+    if store_ids:
+        stores = await db.stores.find({
+            "id": {"$in": store_ids}, "active": True,
+            "homepage_visible": True, "archived_at": None,
+        }, STORE_PUBLIC_DETAIL_FIELDS).sort([("display_rank", 1), ("name", 1)]).to_list(500)
+    return {"category": category, "stores": stores}
+
+
 @api.get("/public/homepage/promotions")
 async def public_homepage_promotions():
     """Only in-window promotions targeting currently active public stores."""

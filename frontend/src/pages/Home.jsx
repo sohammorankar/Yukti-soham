@@ -7,55 +7,16 @@ import { ResultsView } from "@/components/site/ResultsView";
 import { YuktiMagic } from "@/components/site/YuktiMagic";
 import { SectionHead } from "@/components/site/TrendingDeals";
 import { HomepagePromotions } from "@/components/site/HomepagePromotions";
+import { StoreSavingsCard } from "@/components/site/StoreSavingsCard";
 import { MandirContext } from "@/components/site/SiteLayout";
 import { useHomeBootstrap } from "@/components/site/HomeStartupGate";
 import { api } from "@/lib/api";
-import { getBrandAsset } from "@/lib/assets";
 
 const AssetFallback = ({ label, className = "" }) => (
   <div className={`grid place-items-center rounded-lg border border-gold/20 bg-black/20 text-lg font-display font-700 text-gold ${className}`}>
     {label?.trim()?.[0]?.toUpperCase() || "Y"}
   </div>
 );
-
-const StoreSavingsCard = ({ store }) => {
-  const image = store.logo_url || store.image_url || getBrandAsset(store.name);
-  const slug = store.name.toLowerCase().replace(/[^a-z]+/g, "-");
-  const destination = store.slug
-    ? `/stores/${encodeURIComponent(store.slug)}`
-    : `/brands?store=${encodeURIComponent(store.name)}`;
-
-  return (
-    <Link to={destination} data-testid={`brand-${slug}`}
-      className="surface focus-ring group flex min-h-[17rem] flex-col overflow-hidden rounded-lg text-center text-ink transition-[border-color,transform] duration-200 hover:-translate-y-0.5 hover:border-gold/50">
-      <span className="sr-only">Explore savings at {store.name}</span>
-      <div className="flex min-h-12 items-center justify-center px-4 pt-4" data-testid={`brand-${slug}-promo-top`}>
-        {store.promo_top_text && (
-          <p className="line-clamp-2 break-words text-[11px] font-700 uppercase leading-4 text-gold">
-            {store.promo_top_text}
-          </p>
-        )}
-      </div>
-      <div className="flex flex-1 items-center justify-center px-5 py-4">
-        <div className="grid h-24 w-full max-w-[11rem] place-items-center overflow-hidden rounded-lg bg-white/95 p-3" data-testid={`brand-${slug}-logo`}>
-          {image ? (
-            <img src={image} alt={`${store.name} logo`} className="h-full w-full object-contain" loading="lazy" />
-          ) : (
-            <AssetFallback label={store.name} className="h-full w-full border-0 bg-transparent text-2xl" />
-          )}
-        </div>
-      </div>
-      <div className="mx-4 h-px bg-[var(--hairline)]" aria-hidden="true" data-testid={`brand-${slug}-divider`} />
-      <div className="flex min-h-16 items-center justify-center px-4 py-3" data-testid={`brand-${slug}-promo-bottom`}>
-        {store.promo_bottom_text && (
-          <p className="line-clamp-2 break-words text-sm font-700 leading-5 text-ink transition-colors group-hover:text-gold">
-            {store.promo_bottom_text}
-          </p>
-        )}
-      </div>
-    </Link>
-  );
-};
 
 export default function Home() {
   const bootstrap = useHomeBootstrap();
@@ -100,12 +61,13 @@ export default function Home() {
   }, [bootstrap]);
 
   return (
-    <div className="space-y-20 pb-10">
+    <div className="space-y-24 pb-12">
       {magic && <YuktiMagic onDone={() => setMagic(false)} />}
       {/* Hero + engine */}
-      <section className="relative overflow-hidden">
-        <div className="grid-texture pointer-events-none absolute inset-0 opacity-40" />
-        <div className="mx-auto grid max-w-7xl gap-10 px-4 pt-12 sm:px-6 lg:grid-cols-[1fr_1.15fr] lg:pt-16">
+      <section className="relative overflow-hidden border-b border-border pb-14 sm:pb-16">
+        <div className="grid-texture pointer-events-none absolute inset-0 opacity-30" />
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-gold/35 to-transparent" />
+        <div className="mx-auto grid max-w-7xl gap-12 px-4 pt-12 sm:px-6 lg:grid-cols-[0.9fr_1.1fr] lg:items-center lg:pt-20">
           <div className="flex flex-col justify-center">
             <motion.span
               initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
@@ -120,14 +82,15 @@ export default function Home() {
             <motion.p
               initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
               className="mt-5 max-w-lg text-base leading-relaxed text-ink-muted">
-              YuktiCart computes the mathematically best payment route — affiliate cashback,
-              discounted gift cards, store discounts and valid split-payment stacking — for your exact order.
+              YuktiCart evaluates available cashback, gift cards, coupons and payment opportunities
+              to surface your strongest savings route without complicating checkout.
             </motion.p>
             <div className="mt-7 flex flex-wrap gap-3">
-              <a href="#engine" className="btn-gold focus-ring inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-700">
+              <a href="#engine" data-testid="hero-start-saving" className="btn-gold focus-ring inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-700">
                 Start saving <ArrowRight className="h-4 w-4" />
               </a>
               <button onClick={openMandir}
+                data-testid="hero-aabhar-mandir"
                 className="focus-ring inline-flex items-center gap-2 rounded-full border border-border px-5 py-2.5 text-sm text-ink-muted hover:text-gold">
                 <Flame className="h-4 w-4 text-gold" /> Aabhar Mandir
               </button>
@@ -155,16 +118,18 @@ export default function Home() {
         )}
       </div>
 
-      <HomepagePromotions promotions={promotions} />
+      <HomepagePromotions promotions={promotions} stores={stores} />
 
       {/* Save by category — editorial discovery data, never affiliate payout categories. */}
       <section className="mx-auto max-w-7xl px-4 sm:px-6" data-testid="categories-section">
-        <SectionHead icon={Tags} eyebrow="Discovery" title="Save by Category" />
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+        <SectionHead icon={Tags} eyebrow="Discovery" title="Save by Category"
+          sub="Explore stores through YuktiCart's existing savings categories." />
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
           {categories.map((category) => (
-            <Link key={category.id} to={`/categories?c=${encodeURIComponent(category.name)}`}
-              className="surface group overflow-hidden rounded-xl text-ink transition-all hover:border-gold/40">
-              <div className="h-24 overflow-hidden bg-black/20">
+            <Link key={category.id} to={category.slug ? `/category/${encodeURIComponent(category.slug)}` : `/categories?c=${encodeURIComponent(category.name)}`}
+              data-testid={`homepage-category-${category.slug || category.name.toLowerCase().replace(/[^a-z]+/g, "-")}`}
+              className="surface group overflow-hidden rounded-lg text-ink transition-[border-color,transform] duration-200 hover:-translate-y-0.5 hover:border-gold/40">
+              <div className="aspect-[4/3] overflow-hidden border-b border-border bg-black/20">
                 {category.image_url ? (
                   <img src={category.image_url} alt={`${category.name} category`}
                     className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105" loading="lazy" />
@@ -197,7 +162,7 @@ export default function Home() {
       {/* Influencer Offers remain a simple Coming Soon section until a later phase. */}
       <section className="mx-auto max-w-7xl px-4 sm:px-6" data-testid="influencer-section">
         <SectionHead icon={Users} eyebrow="Community" title="Influencer Offers — Coming Soon" />
-        <div className="surface rounded-xl p-6 text-sm text-ink-muted">
+        <div className="surface rounded-lg border-dashed p-6 text-sm text-ink-muted">
           Creator-led savings are on their way.
         </div>
       </section>

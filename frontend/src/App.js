@@ -10,6 +10,7 @@ import { HomeStartupGate } from "@/components/site/HomeStartupGate";
 import Home from "@/pages/Home";
 import StoreDirectory from "@/pages/StoreDirectory";
 import StorePage from "@/pages/StorePage";
+import CategoryPage from "@/pages/CategoryPage";
 import { About, Mission, HowItWorks, Privacy, Terms, AffiliateDisclosure, CashbackDisclaimer, CookiePolicy, FAQ } from "@/pages/content";
 import { FeedbackPage } from "@/pages/FeedbackPage";
 import { Brands, Categories, Deals } from "@/pages/discovery";
@@ -44,6 +45,7 @@ export default function App() {
               <Route path="/" element={<Home />} />
               <Route path="/stores" element={<StoreDirectory />} />
               <Route path="/stores/:slug" element={<StorePage />} />
+              <Route path="/category/:slug" element={<CategoryPage />} />
               <Route path="/deals" element={<Deals />} />
               <Route path="/brands" element={<Brands />} />
               <Route path="/categories" element={<Categories />} />

@@ -99,6 +99,29 @@ secure server-side authz + audit; accessible responsive premium UI.
   rendering checks passed. Existing links, blank promo fallbacks, equal card heights, large logos,
   mobile no-overflow and admin controls were verified with mocked API responses.
 
+## Implemented (2026-10-07) — Reusable Category Landing Pages
+- Added one reusable `/category/:slug` route backed by existing active homepage category records and
+  exact, current, published affiliate category relationships. Relevant stores retain existing
+  visibility, rank, slug, logo and Phase 2 merchandising fields; internal `All` is never resolved.
+- Extracted the Phase 2 store card into a shared component used by both Home and category pages.
+- Category pages reuse existing category images/assets and meta helper, with no-image, no-store,
+  loading, API-error and unknown-slug states. Homepage category cards now use category slugs.
+- Focused Python/API, frontend build and mocked desktop/mobile routing checks passed. A route scroll
+  reset ensures homepage navigation opens at the category hero.
+
+## Implemented (2026-10-07) — Premium Homepage + Blind Eye Deals
+- Preserved the SavingsEngine and hero business logic while refining spacing, hierarchy and core-value
+  presentation within the existing Cyber Obsidian visual system.
+- Renamed the visible promotion section exactly `Blind Eye Deals`. Existing promotion media now uses
+  responsive `picture` sources, a stable 16:9 visual and `object-contain` to protect promotional copy.
+- Deal visuals resolve the matching store from the existing store payload and conditionally overlay
+  its existing `logo_url` or shared brand asset at bottom-right. Destinations and CTA fields are
+  unchanged; no logo appears when no safe match exists.
+- Save by Category retains `/category/:slug`; Save by Store reuses the shared Phase 2 card unchanged;
+  Influencer Offers and footer behavior remain unchanged.
+- Focused frontend build and mocked 1920/768/390 checks passed for hero controls, heading, loaded media,
+  12px bottom-right logo placement, destination/category/store links and no horizontal overflow.
+
 ## Backlog (prioritized)
 - **P1:** MFA for admins; email verification flow; password reset UI; recent-login reauth for role
   changes. Full keyboard cell editing / multi-select / fill-down in the Rate Matrix grid.
