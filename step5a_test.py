@@ -6,7 +6,7 @@ import requests
 import json
 
 # Backend URL from environment
-BACKEND_URL = "https://affiliate-stage.preview.emergentagent.com/api"
+BACKEND_URL = "https://cart-phase-audit.preview.emergentagent.com/api"
 
 # Test credentials
 OWNER_EMAIL = "owner@yukticart.com"
