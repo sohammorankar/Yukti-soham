@@ -12,8 +12,12 @@ import uuid
 import asyncio
 import logging
 import secrets
+import ipaddress
+import requests
+from html import escape
+from html.parser import HTMLParser
 from datetime import datetime, timezone, timedelta, date
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlparse
 
 import jwt
 import bcrypt
@@ -406,11 +410,29 @@ class CorrectionBody(BaseModel):
 
 
 class FeedbackBody(BaseModel):
+    model_config = {"extra": "forbid"}
+
     kind: Literal["contact", "report_rate", "suggest_store"]
-    name: Optional[str] = None
+    name: Optional[str] = Field(default=None, max_length=100)
     email: Optional[EmailStr] = None
-    message: str
-    context: Optional[str] = None
+    message: str = Field(min_length=1, max_length=5000)
+    context: Optional[str] = Field(default=None, max_length=500)
+
+    @field_validator("name", "message", "context")
+    @classmethod
+    def clean_feedback_text(cls, value):
+        if value is None:
+            return None
+        value = value.strip()
+        return value or None
+
+    @model_validator(mode="after")
+    def contact_requires_email(self):
+        if not self.message:
+            raise ValueError("Message is required")
+        if self.kind == "contact" and not self.email:
+            raise ValueError("Email is required for contact requests")
+        return self
 
 
 class HomepageCategoryBody(BaseModel):
@@ -922,7 +944,8 @@ def public_filter():
 
 STORE_PUBLIC_DETAIL_FIELDS = {"_id": 0, "id": 1, "name": 1, "slug": 1, "store_url": 1,
                               "logo_url": 1, "image_url": 1, "description": 1,
-                              "display_rank": 1, "featured": 1}
+                              "display_rank": 1, "featured": 1,
+                              "promo_top_text": 1, "promo_bottom_text": 1}
 
 
 _CATEGORY_GROUP_RULE_FIELDS = (
@@ -1082,6 +1105,33 @@ async def public_homepage_categories():
     return await db.homepage_categories.find(
         {"active": True, "homepage_visible": True}, projection
     ).sort([("display_rank", 1), ("name", 1)]).to_list(100)
+
+
+@api.get("/public/homepage/categories/{slug}")
+async def public_homepage_category_detail(slug: str):
+    """One editorial category plus active visible stores with exact affiliate rules."""
+    projection = {"_id": 0, "id": 1, "name": 1, "slug": 1,
+                  "display_rank": 1, "image_url": 1}
+    category = await db.homepage_categories.find_one(
+        {"slug": (slug or "").strip().lower(), "active": True, "homepage_visible": True}, projection)
+    if not category or (category.get("name") or "").strip().casefold() == "all":
+        raise HTTPException(status_code=404, detail="Category not found")
+
+    rules = await db.rate_cards.find({
+        "category_name": re.compile(f'^{re.escape(category["name"])}$', re.I),
+        "platform_kind": "affiliate", "active": True,
+        "status": "published", "archived_at": None,
+    }, {"_id": 0, "store_id": 1, "valid_from": 1, "valid_until": 1}).to_list(3000)
+    today = datetime.now(timezone.utc).date()
+    store_ids = list({rule["store_id"] for rule in rules
+                      if rule.get("store_id") and _category_group_rule_is_current(rule, today)})
+    stores = []
+    if store_ids:
+        stores = await db.stores.find({
+            "id": {"$in": store_ids}, "active": True,
+            "homepage_visible": True, "archived_at": None,
+        }, STORE_PUBLIC_DETAIL_FIELDS).sort([("display_rank", 1), ("name", 1)]).to_list(500)
+    return {"category": category, "stores": stores}
 
 
 @api.get("/public/homepage/promotions")
@@ -1291,14 +1341,157 @@ async def category_correction(body: CorrectionBody):
     return {"ok": True}
 
 
+EMAIL_BASE_URL = "https://integrations.emergentagent.com"
+_EMAIL_SHORTENERS = ("bit.ly", "tinyurl.com", "t.co", "is.gd", "cutt.ly", "goo.gl", "rebrand.ly")
+_EMAIL_CRED_ASK = (
+    "reply with your password", "reply with the code", "send your password", "cvv",
+    "send us your password", "enter your password below", "confirm your card number",
+    "your full card number", "seed phrase", "recovery phrase", "verify your card",
+    "social security number", "confirm your bank details",
+)
+_EMAIL_HOSTISH = re.compile(r"\b(?:https?://)?((?:[a-z0-9-]+\.)+[a-z]{2,})", re.I)
+
+
+def _email_host_ok(host):
+    if not host or "xn--" in host:
+        return False
+    try:
+        ipaddress.ip_address(host)
+        return False
+    except ValueError:
+        pass
+    return not any(host == item or host.endswith("." + item) for item in _EMAIL_SHORTENERS)
+
+
+def _email_same_site(shown, real):
+    return shown == real or real.endswith("." + shown) or shown.endswith("." + real)
+
+
+class _EmailScan(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.tags, self.urls, self.anchors = set(), [], []
+        self._href, self._text = None, []
+
+    def handle_starttag(self, tag, attrs):
+        self.tags.add(tag.lower())
+        self.urls += [value for key, value in attrs if key.lower() in ("href", "src") and value]
+        if tag.lower() == "a":
+            self._href = dict((key.lower(), value) for key, value in attrs).get("href")
+            self._text = []
+
+    def handle_data(self, data):
+        if self._href is not None:
+            self._text.append(data)
+
+    def handle_endtag(self, tag):
+        if tag.lower() == "a" and self._href is not None:
+            self.anchors.append((self._href, "".join(self._text)))
+            self._href, self._text = None, []
+
+
+def _assert_safe_email(subject, html):
+    scan = _EmailScan()
+    scan.feed(html)
+    if scan.tags & {"form", "input", "textarea", "select"}:
+        raise ValueError("Email templates cannot contain form fields")
+    body = f"{subject}\n{html}".lower()
+    for phrase in _EMAIL_CRED_ASK:
+        if phrase in body:
+            raise ValueError("Email content cannot request credentials")
+    for value in scan.urls:
+        url = value.strip()
+        lower = url.lower()
+        if lower.startswith(("mailto:", "tel:", "cid:", "#")):
+            continue
+        parsed = urlparse(lower)
+        if not lower.startswith("https://") or not _email_host_ok(parsed.hostname or "") or parsed.username:
+            raise ValueError("Email links and assets must use safe HTTPS URLs")
+    for href, text in scan.anchors:
+        real = urlparse(href.strip().lower()).hostname or ""
+        if not real:
+            continue
+        for match in _EMAIL_HOSTISH.finditer(text):
+            if not _email_same_site(match.group(1).lower(), real):
+                raise ValueError("Email link text does not match its destination")
+
+
+def _contact_email_config():
+    config = {
+        "key": os.environ.get("EMERGENT_EMAIL_KEY"),
+        "from_name": os.environ.get("EMAIL_FROM_NAME"),
+        "recipient": os.environ.get("CONTACT_RECIPIENT_EMAIL"),
+        "reply_to": os.environ.get("EMAIL_REPLY_TO"),
+    }
+    if not all(config[field] for field in ("key", "from_name", "recipient")):
+        raise HTTPException(status_code=503, detail="Contact email delivery is not configured")
+    if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", config["recipient"]):
+        raise HTTPException(status_code=503, detail="Contact email recipient is invalid")
+    if config["reply_to"] and not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", config["reply_to"]):
+        raise HTTPException(status_code=503, detail="Contact email Reply-To is invalid")
+    return config
+
+
+async def _send_contact_notification(feedback_doc, config):
+    visitor_email = str(feedback_doc["email"])
+    visitor_name = feedback_doc.get("name") or "Not provided"
+    visitor_message = escape(feedback_doc["message"]).replace("\n", "<br>")
+    subject = "New YuktiCart contact message"
+    html = (
+        '<table role="presentation" width="100%"><tr><td style="padding:24px;font-family:Arial,sans-serif">'
+        '<h2 style="margin:0 0 18px">New contact message</h2>'
+        f'<p><strong>Name:</strong> {escape(visitor_name)}</p>'
+        f'<p><strong>Email:</strong> <a href="mailto:{escape(visitor_email, quote=True)}">'
+        f'{escape(visitor_email)}</a></p>'
+        f'<p><strong>Message:</strong><br>{visitor_message}</p>'
+        '<p style="font-size:12px;color:#666">Submitted through the YuktiCart Contact Us form.</p>'
+        '</td></tr></table>'
+    )
+    try:
+        _assert_safe_email(subject, html)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="This message cannot be delivered safely") from exc
+    payload = {"to": [config["recipient"]], "subject": subject, "html": html,
+               "from_name": config["from_name"]}
+    if config.get("reply_to"):
+        payload["contact_email"] = config["reply_to"]
+
+    def deliver():
+        response = requests.post(
+            f"{EMAIL_BASE_URL}/api/v1/email/send",
+            headers={"X-Email-Key": config["key"]}, json=payload, timeout=30)
+        response.raise_for_status()
+        return response.json().get("id")
+
+    try:
+        return await asyncio.to_thread(deliver)
+    except (requests.RequestException, ValueError) as exc:
+        logger.error("Contact email delivery failed: %s", exc)
+        raise HTTPException(status_code=502, detail="Unable to deliver your message right now") from exc
+
+
 @api.post("/feedback")
 async def feedback(body: FeedbackBody):
-    await db.feedback.insert_one({
+    email_config = _contact_email_config() if body.kind == "contact" else None
+    doc = {
         "id": str(uuid.uuid4()), "kind": body.kind, "name": body.name,
-        "email": body.email, "message": body.message, "context": body.context,
+        "email": str(body.email) if body.email else None,
+        "message": body.message, "context": body.context,
         "timestamp": now_iso(), "status": "new",
-    })
-    return {"ok": True}
+        "delivery_status": "pending" if body.kind == "contact" else "not_required",
+    }
+    await db.feedback.insert_one(dict(doc))
+    if body.kind == "contact":
+        try:
+            email_id = await _send_contact_notification(doc, email_config)
+        except HTTPException:
+            await db.feedback.update_one({"id": doc["id"]}, {"$set": {"delivery_status": "failed"}})
+            raise
+        await db.feedback.update_one(
+            {"id": doc["id"]},
+            {"$set": {"delivery_status": "sent", "email_id": email_id, "delivered_at": now_iso()}})
+        return {"ok": True, "delivery_status": "sent"}
+    return {"ok": True, "delivery_status": "not_required"}
 
 
 # --------------------------------------------------------------------------
@@ -1500,6 +1693,17 @@ async def delete_affiliate_destination(mid: str, request: Request, user=Depends(
 
 
 # ---- Stores + settings ----
+def _store_promo_text(value, field, max_length):
+    if value in (None, ""):
+        return None
+    if not isinstance(value, str):
+        raise HTTPException(400, f"{field} must be text")
+    cleaned = re.sub(r"\s+", " ", value).strip()
+    if len(cleaned) > max_length:
+        raise HTTPException(400, f"{field} must be {max_length} characters or fewer")
+    return cleaned or None
+
+
 @api.get("/admin/stores")
 async def admin_stores(user=Depends(require_any_role)):
     return await db.stores.find({}, {"_id": 0}).sort([("display_rank", 1), ("name", 1)]).to_list(500)
@@ -1529,6 +1733,8 @@ async def create_store(body: dict, request: Request, user=Depends(require_write)
            "logo_url": body.get("logo_url"),
            "image_url": body.get("image_url"),
            "description": body.get("description"),
+           "promo_top_text": _store_promo_text(body.get("promo_top_text"), "promo_top_text", 80),
+           "promo_bottom_text": _store_promo_text(body.get("promo_bottom_text"), "promo_bottom_text", 120),
            "homepage_visible": bool(body.get("homepage_visible", True)),
            "featured": bool(body.get("featured", False)),
            "archived_at": None, "created_at": now_iso(), "updated_at": now_iso()}
@@ -1545,7 +1751,11 @@ async def update_store(sid_: str, body: dict, request: Request, user=Depends(req
     upd = {k: body[k] for k in ("name", "active", "stacking", "stacking_note",
                                 "store_url", "split_payment_supported",
                                 "display_rank", "logo_url", "image_url",
-                                "description", "homepage_visible", "featured") if k in body}
+                                "description", "homepage_visible", "featured",
+                                "promo_top_text", "promo_bottom_text") if k in body}
+    for field, max_length in (("promo_top_text", 80), ("promo_bottom_text", 120)):
+        if field in upd:
+            upd[field] = _store_promo_text(upd[field], field, max_length)
     if body.get("slug"):
         upd["slug"] = await _unique_store_slug(body["slug"], exclude_id=sid_)
     if "display_rank" in upd:
@@ -2101,7 +2311,7 @@ def parse_paste(raw: str, default_customer_type="existing"):
 
     header = split_line(lines[0])
     header_pattern = re.compile(
-        r"^(?:category|new(?:\s+rate)?|existing(?:\s+rate)?|rate|type|user\s+type|customer\s+type|"
+        r"^(?:category|new(?:\s+rate)?|existing(?:\s+rate)?|both(?:\s+rate)?|rate|type|user\s+type|customer\s+type|"
         r"mov|minimum(?:\s+order(?:\s+value)?)?|cap|maximum(?:\s+cashback(?:\s+amount)?|\s+eligible(?:\s+amount)?)?|"
         r"valid\s+from|valid\s+until|from|until|to|notes?)$", re.I)
     has_header = any(header_pattern.fullmatch(cell.strip()) for cell in header)
@@ -2122,6 +2332,8 @@ def parse_paste(raw: str, default_customer_type="existing"):
                 idx["new"] = i
             elif "existing" in heading:
                 idx["existing"] = i
+            elif heading == "both" or heading.startswith("both "):
+                idx["both"] = i
             elif "rate" in heading and "new" not in heading:
                 idx["rate"] = i
             elif heading == "type":
@@ -2162,13 +2374,24 @@ def parse_paste(raw: str, default_customer_type="existing"):
                   "valid_from": get("valid_from"), "valid_until": get("valid_until"),
                   "notes": get("notes"), "source_text": line}
         typed_rates = [("new", get("new")), ("existing", get("existing"))]
+        both_rate = get("both")
+        if both_rate and any(token for _, token in typed_rates):
+            value_type, value = parse_rate_token(both_rate, get("type") or "percent")
+            rows.append({**common, "customer_type": "both", "value_type": value_type,
+                         "value": value,
+                         "parse_error": "Use either Both or New/Existing columns for one row, not both"})
+        elif both_rate:
+            value_type, value = parse_rate_token(both_rate, get("type") or "percent")
+            rows.append({**common, "customer_type": "both",
+                         "value_type": value_type, "value": value})
         if any(token for _, token in typed_rates):
-            for customer_type, token in typed_rates:
-                if token:
-                    value_type, value = parse_rate_token(token, get("type") or "percent")
-                    rows.append({**common, "customer_type": customer_type,
-                                 "value_type": value_type, "value": value})
-        else:
+            if not both_rate:
+                for customer_type, token in typed_rates:
+                    if token:
+                        value_type, value = parse_rate_token(token, get("type") or "percent")
+                        rows.append({**common, "customer_type": customer_type,
+                                     "value_type": value_type, "value": value})
+        elif not both_rate:
             token = get("rate")
             value_type, value = parse_rate_token(token, get("type") or "percent")
             customer_type = (get("customer_type") or default_customer_type).strip().lower()
@@ -2309,10 +2532,13 @@ async def import_preview(body: dict, user=Depends(require_write)):
                 "maximum_eligible_amount": max_eligible,
                 "valid_from": row.get("valid_from") or None, "valid_until": row.get("valid_until") or None,
                 "notes": row.get("notes") or None,
+                "parse_error": row.get("parse_error"),
             }
             matches = cats_by_name.get(_norm_category(cat_name), [])
             reason = None
-            if not cat_name:
+            if item.get("parse_error"):
+                reason = item["parse_error"]
+            elif not cat_name:
                 reason = "Missing category description"
             elif row_customer_type not in ("new", "existing", "both"):
                 reason = "User type must be New, Existing, or Both"
