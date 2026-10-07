@@ -53,8 +53,9 @@ export function Footer() {
             A tactical savings and checkout-stack engine for Indian shoppers. We find the
             mathematically best payment route across affiliate cashback and discounted gift cards.
           </p>
-          <a href="mailto:hello@yukticart.com" className="mt-4 inline-flex items-center gap-2 text-sm text-gold hover:underline">
-            <Mail className="h-4 w-4" /> hello@yukticart.com
+          <a href="mailto:yukticart@gmail.com" data-testid="footer-contact-email"
+            className="mt-4 inline-flex items-center gap-2 text-sm text-gold hover:underline">
+            <Mail className="h-4 w-4" /> yukticart@gmail.com
           </a>
         </div>
         {COLS.map((col) => (
@@ -78,7 +79,7 @@ export function Footer() {
       </div>
       <div className="border-t border-border">
         <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-2 px-4 py-5 text-xs text-ink-muted sm:flex-row sm:px-6">
-          <span>© {new Date().getFullYear()} YuktiCart. Contact details are placeholders — update in the console.</span>
+          <span>© {new Date().getFullYear()} YuktiCart.</span>
           <span>Cashback & category rates are indicative and not guaranteed. Verify before purchase.</span>
         </div>
       </div>
