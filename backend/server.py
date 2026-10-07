@@ -1113,7 +1113,7 @@ async def public_homepage_category_detail(slug: str):
     projection = {"_id": 0, "id": 1, "name": 1, "slug": 1,
                   "display_rank": 1, "image_url": 1}
     category = await db.homepage_categories.find_one(
-        {"slug": (slug or "").strip().lower(), "active": True}, projection)
+        {"slug": (slug or "").strip().lower(), "active": True, "homepage_visible": True}, projection)
     if not category or (category.get("name") or "").strip().casefold() == "all":
         raise HTTPException(status_code=404, detail="Category not found")
 

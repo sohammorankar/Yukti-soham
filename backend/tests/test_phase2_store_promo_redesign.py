@@ -14,6 +14,7 @@ from fastapi import HTTPException
 SERVER_PATH = Path("/app/backend/server.py")
 HOME_PATH = Path("/app/frontend/src/pages/Home.jsx")
 ADMIN_STORES_PATH = Path("/app/frontend/src/pages/admin/Stores.jsx")
+STORE_CARD_PATH = Path("/app/frontend/src/components/site/StoreSavingsCard.jsx")
 
 
 def _load_store_promo_text_fn():
@@ -103,24 +104,25 @@ def test_admin_stores_form_has_controlled_promo_fields_with_maxlength():
 
 # ---- Homepage card structure and fallback wiring ----
 def test_home_card_uses_promo_fields_and_asset_fallback_chain():
-    text = HOME_PATH.read_text()
+    text = STORE_CARD_PATH.read_text()
     assert 'const image = store.logo_url || store.image_url || getBrandAsset(store.name);' in text
     assert 'store.promo_top_text && (' in text
     assert 'store.promo_bottom_text && (' in text
+    assert 'import { StoreSavingsCard } from "@/components/site/StoreSavingsCard";' in HOME_PATH.read_text()
 
 
 def test_home_card_preserves_slug_route_and_fallback_destination():
-    text = HOME_PATH.read_text()
+    text = STORE_CARD_PATH.read_text()
     assert '? `/stores/${encodeURIComponent(store.slug)}`' in text
     assert ': `/brands?store=${encodeURIComponent(store.name)}`;' in text
 
 
 def test_home_card_layout_order_and_responsive_height_contracts():
-    text = HOME_PATH.read_text()
-    assert 'data-testid={`brand-${slug}-promo-top`}' in text
-    assert 'data-testid={`brand-${slug}-logo`}' in text
-    assert 'data-testid={`brand-${slug}-divider`}' in text
-    assert 'data-testid={`brand-${slug}-promo-bottom`}' in text
+    text = STORE_CARD_PATH.read_text()
+    assert 'data-testid={`brand-${testSlug}-promo-top`}' in text
+    assert 'data-testid={`brand-${testSlug}-logo`}' in text
+    assert 'data-testid={`brand-${testSlug}-divider`}' in text
+    assert 'data-testid={`brand-${testSlug}-promo-bottom`}' in text
     assert 'min-h-[17rem]' in text
     assert 'h-24 w-full max-w-[11rem]' in text
-    assert 'xl:grid-cols-5' in text
+    assert 'xl:grid-cols-5' in HOME_PATH.read_text()

@@ -114,7 +114,7 @@ def _rule(store_id, category_name, **overrides):
 
 # --- /api/public/homepage/categories/{slug} endpoint behavior ---
 def test_category_detail_returns_only_current_exact_affiliate_stores_sorted(server_module, monkeypatch):
-    homepage_categories = [{"id": "c1", "name": "Beauty", "slug": "beauty", "active": True, "image_url": None, "display_rank": 1}]
+    homepage_categories = [{"id": "c1", "name": "Beauty", "slug": "beauty", "active": True, "homepage_visible": True, "image_url": None, "display_rank": 1}]
     rate_cards = [
         _rule("s2", "beauty"),  # case-insensitive exact match
         _rule("s1", "Beauty"),
@@ -142,7 +142,7 @@ def test_category_detail_returns_only_current_exact_affiliate_stores_sorted(serv
 
 
 def test_category_detail_excludes_non_visible_inactive_and_archived_stores(server_module, monkeypatch):
-    homepage_categories = [{"id": "c1", "name": "Beauty", "slug": "beauty", "active": True, "image_url": None, "display_rank": 1}]
+    homepage_categories = [{"id": "c1", "name": "Beauty", "slug": "beauty", "active": True, "homepage_visible": True, "image_url": None, "display_rank": 1}]
     rate_cards = [_rule("ok", "Beauty"), _rule("hidden", "Beauty"), _rule("inactive", "Beauty"), _rule("archived", "Beauty")]
     stores = [
         {"id": "ok", "name": "Visible", "slug": "visible", "active": True, "homepage_visible": True, "archived_at": None, "display_rank": 1},
@@ -164,7 +164,7 @@ def test_unknown_category_returns_404(server_module, monkeypatch):
 
 
 def test_internal_all_category_returns_404(server_module, monkeypatch):
-    homepage_categories = [{"id": "c_all", "name": "All", "slug": "all", "active": True, "image_url": None, "display_rank": 1}]
+    homepage_categories = [{"id": "c_all", "name": "All", "slug": "all", "active": True, "homepage_visible": True, "image_url": None, "display_rank": 1}]
     monkeypatch.setattr(server_module, "db", _FakeDb(homepage_categories, [], []))
     with pytest.raises(HTTPException) as exc:
         asyncio.run(server_module.public_homepage_category_detail("all"))
@@ -172,7 +172,7 @@ def test_internal_all_category_returns_404(server_module, monkeypatch):
 
 
 def test_no_matching_stores_returns_empty_array(server_module, monkeypatch):
-    homepage_categories = [{"id": "c1", "name": "Finance", "slug": "finance", "active": True, "image_url": None, "display_rank": 1}]
+    homepage_categories = [{"id": "c1", "name": "Finance", "slug": "finance", "active": True, "homepage_visible": True, "image_url": None, "display_rank": 1}]
     # Rule exists but no eligible public store survives filters.
     rate_cards = [_rule("dead", "Finance")]
     stores = [{"id": "dead", "name": "Dead", "slug": "dead", "active": False, "homepage_visible": True, "archived_at": None, "display_rank": 1}]
