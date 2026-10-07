@@ -22,6 +22,8 @@ export function SavingsEngine({ onResult, initial, initialStores }) {
   const { isAuthed } = useAuth();
   const [stores, setStores] = useState(() => initialStores || []);
   const [categories, setCategories] = useState([]);
+  const [categoryGroups, setCategoryGroups] = useState([]);
+  const [categoryGroup, setCategoryGroup] = useState("");
   const [categoriesForStore, setCategoriesForStore] = useState("");
   const [myCards, setMyCards] = useState([]);
   const [cardId, setCardId] = useState(""); // "" = no card selected (optional)
@@ -65,9 +67,17 @@ export function SavingsEngine({ onResult, initial, initialStores }) {
   }, [initial]);
 
   const storeOptions = useMemo(() => stores.map((s) => ({ value: s.id, label: s.name })), [stores]);
-  const catOptions = useMemo(() => (categoriesForStore === storeId ? categories : [])
-    .filter((c) => (c.name || "").trim().toLowerCase() !== "all")
-    .map((c) => ({ value: c.name, label: c.name })), [categories, categoriesForStore, storeId]);
+  const visibleGroups = useMemo(() => categoriesForStore === storeId ? categoryGroups : [],
+    [categoryGroups, categoriesForStore, storeId]);
+  const catOptions = useMemo(() => visibleGroups.map((group) => ({
+    value: group.name, label: group.name,
+  })), [visibleGroups]);
+  const selectedCategoryGroup = useMemo(() => visibleGroups.find((group) =>
+    group.categories.some((item) => item.name.toLowerCase() === (category || "").toLowerCase()))
+    || visibleGroups.find((group) => group.name === categoryGroup),
+  [visibleGroups, category, categoryGroup]);
+  const exactCategoryOptions = useMemo(() => (selectedCategoryGroup?.categories || [])
+    .map((item) => ({ value: item.name, label: item.name })), [selectedCategoryGroup]);
   const selectedStore = stores.find((s) => s.id === storeId);
   const storeSlug = selectedStore?.slug;
 
@@ -78,6 +88,8 @@ export function SavingsEngine({ onResult, initial, initialStores }) {
 
   useEffect(() => {
     setCategories([]);
+    setCategoryGroups([]);
+    setCategoryGroup("");
     setCategoriesForStore("");
     if (!storeSlug || !showCategory) return;
     let cancelled = false;
@@ -86,7 +98,18 @@ export function SavingsEngine({ onResult, initial, initialStores }) {
         if (cancelled) return;
         const available = (Array.isArray(data.categories) ? data.categories : [])
           .filter((c) => (c?.name || "").trim().toLowerCase() !== "all");
+        const groups = (Array.isArray(data.category_groups) ? data.category_groups : [])
+          .filter((group) => Array.isArray(group?.categories) && group.categories.length)
+          .map((group) => ({
+            ...group,
+            categories: group.categories.filter((item) =>
+              (item?.name || "").trim().toLowerCase() !== "all"),
+          }))
+          .filter((group) => group.categories.length);
+        const displayGroups = groups.length ? groups
+          : available.map((item) => ({ name: item.name, categories: [item] }));
         setCategories(available);
+        setCategoryGroups(displayGroups);
         setCategoriesForStore(storeId);
         setCategory((current) => {
           const match = available.find((c) => c.name.toLowerCase() === (current || "").trim().toLowerCase());
@@ -159,6 +182,8 @@ export function SavingsEngine({ onResult, initial, initialStores }) {
   const onStoreChange = (val) => {
     if (val !== storeId) {
       setCategories([]);
+      setCategoryGroups([]);
+      setCategoryGroup("");
       setCategory("");
       setDetection(null);
       setDetectedCategory(null);
@@ -177,11 +202,23 @@ export function SavingsEngine({ onResult, initial, initialStores }) {
     }
   };
 
+  const onCategoryGroupChange = (val) => {
+    const group = visibleGroups.find((item) => item.name === val);
+    if (!group) return;
+    setCategoryGroup(group.name);
+    const exactMatch = group.categories.find((item) =>
+      item.name.toLowerCase() === (category || "").toLowerCase());
+    if (exactMatch) return;
+    setDetection(null);
+    if (group.categories.length === 1) onCategoryChange(group.categories[0].name);
+    else setCategory("");
+  };
+
   const calculate = async () => {
     if (!selectedStore) { toast.error("Please choose a store"); return; }
     if (!price) { toast.error("Enter the selling price"); return; }
     if (mrp && Number(price) > Number(mrp)) { toast.error("Selling price cannot exceed MRP"); return; }
-    if (showCategory && !catOptions.some((option) => option.value === category)) {
+    if (showCategory && !categories.some((item) => item.name === category)) {
       toast.error("Please choose a category"); return;
     }
     setLoading(true);
@@ -261,8 +298,17 @@ export function SavingsEngine({ onResult, initial, initialStores }) {
                   )
                 )}
               </label>
-              <Combobox options={catOptions} value={category} onChange={onCategoryChange}
+              <Combobox options={catOptions} value={selectedCategoryGroup?.name || categoryGroup}
+                onChange={onCategoryGroupChange}
                 placeholder="Choose category" testid="select-category" ariaLabel="Select category" />
+              {selectedCategoryGroup?.categories.length > 1 && !category && (
+                <div className="mt-2" data-testid="exact-category-field">
+                  <label className="mb-1 block text-[11px] font-600 text-ink-muted">Exact category</label>
+                  <Combobox options={exactCategoryOptions} value={category} onChange={onCategoryChange}
+                    placeholder="Choose exact category" testid="select-category-exact"
+                    ariaLabel="Select exact product category" />
+                </div>
+              )}
               {detection?.explanation && (
                 <p className="mt-1 text-[11px] text-ink-muted">{detection.explanation}</p>
               )}
