@@ -123,7 +123,7 @@ export default function Home() {
       <div id="results-anchor" className="scroll-mt-20">
         {result && (
           <section className="mx-auto max-w-7xl px-4 sm:px-6">
-            <SectionHead icon={Zap} eyebrow="Your result" title="Your best stack" />
+            <SectionHead icon={Zap} eyebrow="Your result" title="Your best savings stack" />
             <ResultsView result={result} onBackHome={handleBackHome} />
           </section>
         )}
