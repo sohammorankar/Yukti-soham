@@ -43,6 +43,7 @@ export function ResultsView({ result, onBackHome }) {
     ...(result.gift_card?.applied ? ["Gift Card"] : []),
     ...(result.affiliate?.applied ? ["Cashback"] : []),
   ];
+  const executionSteps = buildExecutionSteps(result, winningCardUsed, winningCardName);
   const feedbackKey = [
     result.inputs?.store,
     result.inputs?.category,
@@ -134,14 +135,14 @@ export function ResultsView({ result, onBackHome }) {
           <section className="surface rounded-2xl p-5 sm:p-6" data-testid="recommended-route">
             <p className="text-xs font-700 uppercase tracking-[0.16em] text-gold">Savings journey</p>
             <h3 className="mt-2 font-display text-2xl font-700 text-ink" data-testid="route-headline">
-              How to unlock your {money(s.extra_saved)} savings
+              How to use your savings
             </h3>
             <p className="mt-2 text-sm leading-relaxed text-ink-muted">
-              Follow the calculated sequence below to execute your savings stack.
+              Follow this order to preserve the validated savings route and partner tracking.
             </p>
-            {result.checkout_steps?.length > 0 && (
+            {executionSteps.length > 0 && (
               <ol className="mt-6 space-y-4" data-testid="checkout-steps">
-                {result.checkout_steps.map((step, i) => (
+                {executionSteps.map((step, i) => (
                   <li key={i} className="flex gap-3 text-sm leading-relaxed text-ink-muted">
                     <span className="btn-gold grid h-7 w-7 shrink-0 place-items-center rounded-full text-xs font-700">{i + 1}</span>
                     <span className="pt-0.5">{step}</span>
@@ -374,6 +375,63 @@ function PartnerSection({ result, side }) {
       )}
     </div>
   );
+}
+
+function buildExecutionSteps(result, cardUsed, cardName) {
+  const hasGiftCard = Boolean(result.gift_card?.applied && result.gift_card?.best);
+  const hasCashback = Boolean(result.affiliate?.applied && result.affiliate?.best);
+  const giftCardPartner = result.gift_card?.best?.platform_name;
+  const cashbackPartner = result.affiliate?.best?.platform_name;
+  const cardLabel = cardName || "saved card";
+
+  if (cardUsed && hasGiftCard && hasCashback) {
+    return [
+      `Buy the eligible gift card from ${giftCardPartner}.`,
+      `Keep your eligible ${cardLabel} ready where the validated card offer applies.`,
+      `Start the merchant purchase through ${cashbackPartner} so the journey is tracked.`,
+      "Complete checkout using the validated payment method shown in your savings route.",
+    ];
+  }
+  if (hasGiftCard && hasCashback) {
+    return [
+      `Buy the eligible gift card from ${giftCardPartner}.`,
+      `Start your purchase through ${cashbackPartner} so the cashback journey is tracked.`,
+      "Complete the merchant checkout and pay using the gift card.",
+    ];
+  }
+  if (cardUsed && hasCashback) {
+    return [
+      `Use your eligible ${cardLabel}.`,
+      `Start your purchase through ${cashbackPartner} so the cashback journey is tracked.`,
+      `Complete the merchant checkout using ${cardLabel}.`,
+    ];
+  }
+  if (cardUsed && hasGiftCard) {
+    return [
+      `Buy the eligible gift card from ${giftCardPartner}.`,
+      `Keep your eligible ${cardLabel} ready where the validated card offer applies.`,
+      "Complete checkout using the validated payment method shown in your savings route.",
+    ];
+  }
+  if (cardUsed) {
+    return [
+      `Use your eligible ${cardLabel}.`,
+      `Complete the merchant checkout using ${cardLabel}.`,
+    ];
+  }
+  if (hasGiftCard) {
+    return [
+      `Buy the eligible gift card from ${giftCardPartner}.`,
+      "Complete the merchant checkout using the gift card.",
+    ];
+  }
+  if (hasCashback) {
+    return [
+      `Start your purchase through ${cashbackPartner} so the journey is tracked.`,
+      "Complete the merchant purchase through the tracked journey.",
+    ];
+  }
+  return [];
 }
 
 function savingsConclusion(result) {
