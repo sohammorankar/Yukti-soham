@@ -1417,6 +1417,26 @@ async def _load_rates_for(store_id):
     return aff, gc
 
 
+async def _load_card_offers(card_catalog_id, store_id):
+    """Load configured offers for one catalogue card/store and add category names for matching."""
+    if not card_catalog_id or not store_id:
+        return []
+    docs = await db.card_offers.find({
+        "card_id": card_catalog_id,
+        "store_id": store_id,
+        "active": True,
+    }, {"_id": 0}).to_list(500)
+    category_ids = list({doc.get("category_id") for doc in docs if doc.get("category_id")})
+    categories = await db.categories.find(
+        {"id": {"$in": category_ids}}, {"_id": 0, "id": 1, "name": 1}).to_list(500)
+    category_names = {category["id"]: category["name"] for category in categories}
+    for doc in docs:
+        doc["category_name"] = (category_names.get(doc.get("category_id"))
+                                if doc.get("category_id") else "All")
+    return docs
+
+
+
 async def _resolve_store(store_id=None, store_name=None):
     if store_id:
         s = await db.stores.find_one({"id": store_id}, {"_id": 0})
@@ -1445,19 +1465,23 @@ async def calculate(body: CalcBody, request: Request):
     # Optional payment card: must be one of the caller's OWN saved profiles.
     # Guests and no-card requests calculate exactly as before (card=None).
     card = None
+    card_offers = []
     if body.card_id:
         caller = await get_optional_user(request)
         if not caller:
             raise HTTPException(status_code=401, detail="Log in to use a saved card")
         owned = await db.card_profiles.find_one(
             {"id": body.card_id, "user_id": caller["id"]},
-            {"_id": 0, "bank_name": 1, "card_type": 1, "card_network": 1, "card_name": 1})
+            {"_id": 0, "bank_name": 1, "card_type": 1, "card_network": 1,
+             "card_name": 1, "card_catalog_id": 1})
         if not owned:
             raise HTTPException(status_code=404, detail="Card not found")
         card = owned
+        card_offers = await _load_card_offers(card.get("card_catalog_id"), store.get("id"))
 
     result = calculate_stack(store, body.category, body.customer_type, body.mrp,
-                             body.price, aff, gc, rate_version=RATE_VERSION, card=card)
+                             body.price, aff, gc, rate_version=RATE_VERSION, card=card,
+                             card_offers=card_offers)
     result["fallback"] = fallback
 
     # Enrich routes with the partner's website (editable in the console) so the UI
