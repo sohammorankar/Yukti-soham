@@ -1,5 +1,5 @@
 import React, { useContext, useEffect, useState } from "react";
-import { Link, useLocation, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Sparkles, Store, Tags, Users, ArrowRight, Flame, Zap } from "lucide-react";
 import { SavingsEngine } from "@/components/site/SavingsEngine";
@@ -22,6 +22,7 @@ export default function Home() {
   const bootstrap = useHomeBootstrap();
   const [result, setResult] = useState(null);
   const [magic, setMagic] = useState(false);
+  const [engineResetKey, setEngineResetKey] = useState(0);
   const handleResult = (data) => { setResult(data); setMagic(true); };
   const [initial, setInitial] = useState(null);
   const [stores, setStores] = useState(() => bootstrap?.stores || []);
@@ -31,6 +32,16 @@ export default function Home() {
   const openMandir = useContext(MandirContext);
   const [searchParams] = useSearchParams();
   const location = useLocation();
+  const navigate = useNavigate();
+
+  const handleBackHome = () => {
+    setResult(null);
+    setMagic(false);
+    setInitial(null);
+    setEngineResetKey((key) => key + 1);
+    navigate("/", { replace: true });
+    requestAnimationFrame(() => window.scrollTo({ top: 0, left: 0, behavior: "smooth" }));
+  };
 
   // A product link pasted in the navbar search arrives as ?u=... — prefill the
   // Savings Engine with it (this triggers the existing auto-detect flow only).
@@ -103,7 +114,7 @@ export default function Home() {
           </div>
 
           <div id="engine" className="scroll-mt-20">
-            <SavingsEngine onResult={handleResult} initial={initial} initialStores={stores} />
+            <SavingsEngine key={engineResetKey} onResult={handleResult} initial={initial} initialStores={stores} />
           </div>
         </div>
       </section>
@@ -113,7 +124,7 @@ export default function Home() {
         {result && (
           <section className="mx-auto max-w-7xl px-4 sm:px-6">
             <SectionHead icon={Zap} eyebrow="Your result" title="Your best stack" />
-            <ResultsView result={result} />
+            <ResultsView result={result} onBackHome={handleBackHome} />
           </section>
         )}
       </div>
