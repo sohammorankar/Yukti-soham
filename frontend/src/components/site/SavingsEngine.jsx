@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { Link2, Store, Tags, Calculator, Info, BadgeCheck, HelpCircle, Frown, Smile, Loader2, CreditCard } from "lucide-react";
 import { Combobox } from "@/components/Combobox";
 import {
@@ -20,6 +20,7 @@ function looksLikeUrl(val) {
 
 export function SavingsEngine({ onResult, initial, initialStores }) {
   const { isAuthed } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [stores, setStores] = useState(() => initialStores || []);
   const [categories, setCategories] = useState([]);
   const [categoryGroups, setCategoryGroups] = useState([]);
@@ -65,6 +66,33 @@ export function SavingsEngine({ onResult, initial, initialStores }) {
       if (initial.url) setUrl(initial.url);
     }
   }, [initial]);
+
+  // Store pages can deep-link into the Savings Engine with ?store=<slug>.
+  // Resolve that slug against the already-loaded public store list, then consume
+  // the query parameter so the URL stays clean. Category and customer type are
+  // intentionally left to the existing detection/rule-driven flow.
+  useEffect(() => {
+    const requestedStoreSlug = (searchParams.get("store") || "").trim().toLowerCase();
+    if (!requestedStoreSlug || !stores.length) return;
+
+    const matchedStore = stores.find(
+      (store) => (store.slug || "").trim().toLowerCase() === requestedStoreSlug
+    );
+    if (!matchedStore) return;
+
+    if (storeId !== matchedStore.id) {
+      setStoreId(matchedStore.id);
+      setDetectedStoreName(null);
+      setDetection(null);
+      setDetectedCategory(null);
+      setCategory("");
+      setCategoryGroup("");
+    }
+
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete("store");
+    setSearchParams(nextParams, { replace: true });
+  }, [searchParams, stores, storeId, setSearchParams]);
 
   const storeOptions = useMemo(() => stores.map((s) => ({ value: s.id, label: s.name })), [stores]);
   const visibleGroups = useMemo(() => categoriesForStore === storeId ? categoryGroups : [],
