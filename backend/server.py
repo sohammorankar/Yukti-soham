@@ -1486,6 +1486,89 @@ async def _load_card_offers(store_id):
     return docs
 
 
+async def _find_missing_card_opportunity(store, product_category, customer_type,
+                                         mrp, price, affiliate_rules, giftcard_rules,
+                                         card_offers, owned_cards, actual_result):
+    """Return one validated non-owned card opportunity without changing actual savings."""
+    if not card_offers or not store.get("id"):
+        return {"available": False}
+
+    owned_catalog_ids = {card.get("card_catalog_id") for card in owned_cards
+                         if card.get("card_catalog_id")}
+    catalogue = await db.card_catalogue.find(
+        {"active": True},
+        {"_id": 0, "id": 1, "bank_name": 1, "card_name": 1,
+         "card_type": 1, "card_network": 1}).to_list(2000)
+    current_savings = D(actual_result["summary"]["extra_saved"]["exact"])
+    offer_lookup = {offer["id"]: offer for offer in card_offers}
+    scope_rank = {"legacy_specific_card": 3, "specific_cards": 3, "issuer": 2,
+                  "all_eligible_cards": 1}
+    winner = None
+
+    for catalogue_card in catalogue:
+        if catalogue_card["id"] in owned_catalog_ids:
+            continue
+        candidate_card = {
+            "id": catalogue_card["id"],
+            "card_catalog_id": catalogue_card["id"],
+            "card_name": catalogue_card.get("card_name"),
+            "bank_name": catalogue_card.get("bank_name"),
+            "card_type": catalogue_card.get("card_type"),
+            "card_network": catalogue_card.get("card_network"),
+        }
+        candidate_result = calculate_stack(
+            store, product_category, customer_type, mrp, price,
+            affiliate_rules, giftcard_rules, rate_version=RATE_VERSION,
+            card=candidate_card, card_offers=card_offers)
+        applied_offer = (candidate_result.get("card_offer") or {}).get("applied_offer")
+        if not applied_offer:
+            continue
+        candidate_savings = D(candidate_result["summary"]["extra_saved"]["exact"])
+        if candidate_savings <= current_savings:
+            continue
+        offer_doc = offer_lookup.get(applied_offer.get("offer_id"), {})
+        rank = (
+            candidate_savings,
+            int(applied_offer.get("priority") or 0),
+            scope_rank.get(applied_offer.get("eligibility_scope"), 0),
+            str(applied_offer.get("valid_from") or ""),
+            str(catalogue_card["id"]),
+        )
+        if winner is None or rank > winner["rank"]:
+            winner = {
+                "rank": rank,
+                "card": catalogue_card,
+                "offer": applied_offer,
+                "offer_doc": offer_doc,
+                "result": candidate_result,
+                "candidate_savings": candidate_savings,
+            }
+
+    if not winner:
+        return {"available": False}
+
+    card = winner["card"]
+    offer = winner["offer"]
+    offer_doc = winner["offer_doc"]
+    candidate_result = winner["result"]
+    return {
+        "available": True,
+        "card_id": card["id"],
+        "card_name": card.get("card_name"),
+        "issuer": card.get("bank_name"),
+        "offer_id": offer.get("offer_id"),
+        "offer_name": offer.get("offer_name"),
+        "potential_savings": candidate_result["summary"]["extra_saved"],
+        "current_savings": actual_result["summary"]["extra_saved"],
+        "potential_extra_savings": money_out(q(winner["candidate_savings"] - current_savings)),
+        "stack_components": candidate_result.get("stacking", {}).get("applied_components", []),
+        "route_type": candidate_result.get("stacking", {}).get("applied_route"),
+        "promotion_headline": offer_doc.get("promotion_headline") or "Potential Extra Savings",
+        "promotion_description": offer_doc.get("promotion_description"),
+        "cta_label": offer_doc.get("promotion_cta_label") or "View Card Offer",
+        "card_offer_url": offer_doc.get("card_offer_url"),
+    }
+
 
 async def _resolve_store(store_id=None, store_name=None):
     if store_id:
@@ -1515,23 +1598,24 @@ async def calculate(body: CalcBody, request: Request):
     # New consumer requests automatically evaluate every catalogue-backed saved
     # card. Legacy callers may still provide card_id to evaluate one owned card.
     caller = await get_optional_user(request)
+    all_saved_cards = (await db.card_profiles.find(
+        {"user_id": caller["id"]}, CARD_PROJECTION).sort("created_at", 1).to_list(200)
+        if caller else [])
     saved_cards = []
     mode = "guest_baseline"
     if body.card_id:
         if not caller:
             raise HTTPException(status_code=401, detail="Log in to use a saved card")
-        owned = await db.card_profiles.find_one(
-            {"id": body.card_id, "user_id": caller["id"]}, CARD_PROJECTION)
+        owned = next((card for card in all_saved_cards if card.get("id") == body.card_id), None)
         if not owned:
             raise HTTPException(status_code=404, detail="Card not found")
         saved_cards = [owned]
         mode = "legacy_explicit"
     elif caller:
-        saved_cards = await db.card_profiles.find(
-            {"user_id": caller["id"]}, CARD_PROJECTION).sort("created_at", 1).to_list(200)
+        saved_cards = all_saved_cards
         mode = "automatic"
 
-    card_offers = await _load_card_offers(store.get("id")) if saved_cards else []
+    card_offers = await _load_card_offers(store.get("id"))
 
     def run_calculation(card=None):
         return calculate_stack(
@@ -1592,6 +1676,9 @@ async def calculate(body: CalcBody, request: Request):
         "stack_components": stack_components,
         "route_type": result.get("stacking", {}).get("applied_route"),
     }
+    result["missing_card_opportunity"] = await _find_missing_card_opportunity(
+        store, body.category, body.customer_type, body.mrp, body.price, aff, gc,
+        card_offers, all_saved_cards, result)
     result["fallback"] = fallback
 
     # Enrich routes with the partner's website (editable in the console) so the UI

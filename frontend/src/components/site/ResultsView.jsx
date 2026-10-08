@@ -28,6 +28,9 @@ export function ResultsView({ result, onBackHome }) {
   const winningCardName = cardOptimization.selected_card_name || result.inputs?.card?.card_name || result.card_offer?.card_name;
   const winningCardIssuer = cardOptimization.selected_card_issuer || result.inputs?.card?.bank_name;
   const appliedCardOffer = result.card_offer?.applied ? result.card_offer?.applied_offer : null;
+  const missingCardOpportunity = result.missing_card_opportunity?.available
+    ? result.missing_card_opportunity
+    : null;
   const cardEligibilityApplied = Boolean(
     (result.affiliate?.applied && result.affiliate?.best?.card_rule_applied)
     || (result.gift_card?.applied && result.gift_card?.best?.card_rule_applied)
@@ -175,6 +178,34 @@ export function ResultsView({ result, onBackHome }) {
             <PartnerSection result={result} side="affiliate" />
           </div>
         </section>
+      )}
+
+      {missingCardOpportunity && (
+        <aside className="surface rounded-2xl border border-gold/25 p-4 sm:p-5" data-testid="missing-card-opportunity">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <p className="text-xs font-700 uppercase tracking-[0.16em] text-gold">
+                {missingCardOpportunity.promotion_headline || "Potential Extra Savings"}
+              </p>
+              <h3 className="mt-1 font-display text-lg font-700 text-ink">
+                You could save up to {money(missingCardOpportunity.potential_extra_savings)} more with {missingCardOpportunity.card_name}.
+              </h3>
+              {missingCardOpportunity.promotion_description && (
+                <p className="mt-1 text-sm text-ink-muted">{missingCardOpportunity.promotion_description}</p>
+              )}
+              <p className="mt-2 text-xs text-ink-muted">
+                This is a potential future opportunity for a card not currently saved in My Cards. Your actual result above is unchanged.
+              </p>
+            </div>
+            {missingCardOpportunity.card_offer_url && (
+              <a href={missingCardOpportunity.card_offer_url} target="_blank" rel="noopener noreferrer"
+                data-testid="missing-card-cta"
+                className="btn-gold focus-ring inline-flex shrink-0 items-center justify-center gap-1.5 rounded-full px-4 py-2 text-sm font-700">
+                {missingCardOpportunity.cta_label || "View Card Offer"} <ArrowUpRight className="h-4 w-4" />
+              </a>
+            )}
+          </div>
+        </aside>
       )}
 
       {result.warnings?.length > 0 && (
