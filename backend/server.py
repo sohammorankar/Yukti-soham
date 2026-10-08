@@ -373,6 +373,112 @@ class CardBody(BaseModel):
         return v
 
 
+
+class CardOfferStackability(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    affiliate: bool = False
+    gift_card: bool = False
+    coupon: bool = False
+    other_card: bool = False
+
+
+class CardOfferBody(BaseModel):
+    """Admin-managed card offer rules. These records are independent of the
+    current savings engine and reference existing catalogue/store identities."""
+    model_config = {"extra": "forbid"}
+
+    card_id: str = Field(min_length=1, max_length=100)
+    store_id: str = Field(min_length=1, max_length=100)
+    offer_name: str = Field(min_length=1, max_length=160)
+    offer_type: Literal["instant_discount", "cashback", "reward", "other"]
+    discount_type: Literal["percentage", "flat"]
+    discount_value: str = Field(min_length=1, max_length=32)
+    minimum_order_value: Optional[str] = Field(default=None, max_length=32)
+    maximum_discount_amount: Optional[str] = Field(default=None, max_length=32)
+    maximum_eligible_amount: Optional[str] = Field(default=None, max_length=32)
+    payment_method: Literal["credit", "debit", "both"] = "both"
+    customer_type: Literal["new", "existing", "both"] = "both"
+    category_id: Optional[str] = Field(default=None, max_length=100)
+    eligibility_notes: Optional[str] = Field(default=None, max_length=1000)
+    valid_from: Optional[date] = None
+    valid_until: Optional[date] = None
+    active: bool = True
+    stackability: CardOfferStackability = Field(default_factory=CardOfferStackability)
+    priority: int = Field(default=0, ge=0, le=100000)
+    notes: Optional[str] = Field(default=None, max_length=2000)
+    card_offer_url: Optional[str] = Field(default=None, max_length=2048)
+    promotion_headline: Optional[str] = Field(default=None, max_length=180)
+    promotion_description: Optional[str] = Field(default=None, max_length=1000)
+    promotion_cta_label: Optional[str] = Field(default=None, max_length=80)
+
+    @field_validator("card_id", "store_id")
+    @classmethod
+    def clean_card_offer_reference(cls, value):
+        value = value.strip()
+        if not value:
+            raise ValueError("Reference is required")
+        return value
+
+    @field_validator("category_id")
+    @classmethod
+    def clean_card_offer_category(cls, value):
+        return value.strip() if value and value.strip() else None
+
+    @field_validator("offer_name")
+    @classmethod
+    def clean_card_offer_name(cls, value):
+        value = re.sub(r"\s+", " ", value).strip()
+        if not value:
+            raise ValueError("Offer name is required")
+        return value
+
+    @field_validator("eligibility_notes", "notes", "promotion_headline",
+                     "promotion_description", "promotion_cta_label")
+    @classmethod
+    def clean_card_offer_text(cls, value):
+        if value is None:
+            return None
+        value = re.sub(r"\s+", " ", value).strip()
+        return value or None
+
+    @field_validator("discount_value")
+    @classmethod
+    def validate_required_card_offer_money(cls, value):
+        text = str(value).strip()
+        if not re.fullmatch(r"\d{1,12}(?:\.\d{1,2})?", text):
+            raise ValueError("must be a valid non-negative amount")
+        return str(q(text))
+
+    @field_validator("minimum_order_value", "maximum_discount_amount", "maximum_eligible_amount")
+    @classmethod
+    def validate_optional_card_offer_money(cls, value):
+        if value in (None, ""):
+            return None
+        text = str(value).strip()
+        if not re.fullmatch(r"\d{1,12}(?:\.\d{1,2})?", text):
+            raise ValueError("must be a valid non-negative amount")
+        return str(q(text))
+
+    @field_validator("card_offer_url")
+    @classmethod
+    def validate_card_offer_url(cls, value):
+        if value in (None, ""):
+            return None
+        value = value.strip()
+        if not _is_safe_http_url(value):
+            raise ValueError("must be a valid absolute http(s) URL")
+        return value
+
+    @model_validator(mode="after")
+    def validate_card_offer_rules(self):
+        if self.discount_type == "percentage" and D(self.discount_value) > 100:
+            raise ValueError("Percentage discount cannot exceed 100")
+        if self.valid_from and self.valid_until and self.valid_until < self.valid_from:
+            raise ValueError("Valid until must be on or after valid from")
+        return self
+
+
 class CalcBody(BaseModel):
     store_id: Optional[str] = None
     store_name: Optional[str] = None
@@ -433,6 +539,47 @@ class FeedbackBody(BaseModel):
         if self.kind == "contact" and not self.email:
             raise ValueError("Email is required for contact requests")
         return self
+
+
+class ResultFeedbackContext(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    store_id: Optional[str] = Field(default=None, max_length=80)
+    store_name: Optional[str] = Field(default=None, max_length=100)
+    store_slug: Optional[str] = Field(default=None, max_length=120)
+    category: Optional[str] = Field(default=None, max_length=100)
+    order_value: Optional[str] = Field(default=None, max_length=32)
+    total_saving: Optional[str] = Field(default=None, max_length=32)
+    effective_price: Optional[str] = Field(default=None, max_length=32)
+    gift_card_saving: Optional[str] = Field(default=None, max_length=32)
+    cashback_saving: Optional[str] = Field(default=None, max_length=32)
+    calculation_id: Optional[str] = Field(default=None, max_length=100)
+    rate_version: Optional[str] = Field(default=None, max_length=40)
+
+    @field_validator("order_value", "total_saving", "effective_price", "gift_card_saving", "cashback_saving")
+    @classmethod
+    def validate_money_text(cls, value):
+        if value is None:
+            return None
+        value = value.strip()
+        if not re.fullmatch(r"\d{1,12}(?:\.\d{1,2})?", value):
+            raise ValueError("must be a non-negative money value")
+        return value
+
+
+class ResultFeedbackBody(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    sentiment: Literal["positive", "negative"]
+    rating: int = Field(ge=1, le=5)
+    notes: str = Field(default="", max_length=1500)
+    context: ResultFeedbackContext = Field(default_factory=ResultFeedbackContext)
+
+    @field_validator("notes")
+    @classmethod
+    def clean_result_feedback_notes(cls, value):
+        return value.strip()
+
 
 
 class HomepageCategoryBody(BaseModel):
@@ -547,6 +694,11 @@ async def startup():
         [("active", 1), ("homepage_visible", 1), ("display_rank", 1)])
     await db.homepage_promotions.create_index("id", unique=True)
     await db.homepage_promotions.create_index("store_id")
+    await db.card_offers.create_index("id", unique=True)
+    await db.card_offers.create_index("card_id")
+    await db.card_offers.create_index("store_id")
+    await db.card_offers.create_index([("active", 1), ("valid_from", 1), ("valid_until", 1)])
+
     await db.homepage_promotions.create_index(
         [("active", 1), ("start_date", 1), ("end_date", 1), ("display_rank", 1)])
 
@@ -934,6 +1086,95 @@ async def admin_activate_catalogue_card(cid: str, body: dict, request: Request, 
     return {"ok": True}
 
 
+async def _validate_card_offer_references(body: CardOfferBody):
+    card = await db.card_catalogue.find_one({"id": body.card_id}, {"_id": 0})
+    if not card:
+        raise HTTPException(400, "Selected catalogue card does not exist")
+    store = await db.stores.find_one({"id": body.store_id}, {"_id": 0})
+    if not store:
+        raise HTTPException(400, "Selected store does not exist")
+    category = None
+    if body.category_id:
+        category = await db.categories.find_one({"id": body.category_id}, {"_id": 0})
+        if not category:
+            raise HTTPException(400, "Selected category does not exist")
+    return card, store, category
+
+
+async def _enrich_card_offers(docs: list) -> list:
+    if not docs:
+        return docs
+    card_ids = list({doc["card_id"] for doc in docs})
+    store_ids = list({doc["store_id"] for doc in docs})
+    category_ids = list({doc.get("category_id") for doc in docs if doc.get("category_id")})
+    cards = await db.card_catalogue.find(
+        {"id": {"$in": card_ids}}, {"_id": 0, "id": 1, "bank_name": 1, "card_name": 1}).to_list(1000)
+    stores = await db.stores.find(
+        {"id": {"$in": store_ids}}, {"_id": 0, "id": 1, "name": 1}).to_list(1000)
+    categories = await db.categories.find(
+        {"id": {"$in": category_ids}}, {"_id": 0, "id": 1, "name": 1}).to_list(1000)
+    card_map = {item["id"]: item for item in cards}
+    store_map = {item["id"]: item for item in stores}
+    category_map = {item["id"]: item for item in categories}
+    for doc in docs:
+        card = card_map.get(doc["card_id"], {})
+        doc["card_name"] = card.get("card_name") or "Unknown card"
+        doc["bank_name"] = card.get("bank_name")
+        doc["store_name"] = store_map.get(doc["store_id"], {}).get("name") or "Unknown store"
+        doc["category_name"] = category_map.get(doc.get("category_id"), {}).get("name") or "All categories"
+    return docs
+
+
+@api.get("/admin/card-offers")
+async def admin_list_card_offers(user=Depends(require_any_role)):
+    docs = await db.card_offers.find({}, {"_id": 0}).sort(
+        [("priority", -1), ("updated_at", -1)]).to_list(1000)
+    return await _enrich_card_offers(docs)
+
+
+@api.post("/admin/card-offers", status_code=201)
+async def admin_create_card_offer(body: CardOfferBody, request: Request, user=Depends(require_write)):
+    await _validate_card_offer_references(body)
+    now = now_iso()
+    doc = {
+        "id": str(uuid.uuid4()),
+        **body.model_dump(mode="json"),
+        "created_at": now,
+        "updated_at": now,
+    }
+    await db.card_offers.insert_one(dict(doc))
+    await audit(user, "create", "card_offer", doc["id"], None, clean(dict(doc)), request)
+    return (await _enrich_card_offers([dict(doc)]))[0]
+
+
+@api.put("/admin/card-offers/{offer_id}")
+async def admin_update_card_offer(offer_id: str, body: CardOfferBody, request: Request,
+                                  user=Depends(require_write)):
+    before = await db.card_offers.find_one({"id": offer_id}, {"_id": 0})
+    if not before:
+        raise HTTPException(404, "Card offer not found")
+    await _validate_card_offer_references(body)
+    updates = {**body.model_dump(mode="json"), "updated_at": now_iso()}
+    await db.card_offers.update_one({"id": offer_id}, {"$set": updates})
+    after = await db.card_offers.find_one({"id": offer_id}, {"_id": 0})
+    await audit(user, "update", "card_offer", offer_id, before, after, request)
+    return (await _enrich_card_offers([after]))[0]
+
+
+@api.post("/admin/card-offers/{offer_id}/activate")
+async def admin_activate_card_offer(offer_id: str, body: dict, request: Request,
+                                    user=Depends(require_write)):
+    before = await db.card_offers.find_one({"id": offer_id}, {"_id": 0})
+    if not before:
+        raise HTTPException(404, "Card offer not found")
+    active = bool(body.get("active", True))
+    await db.card_offers.update_one(
+        {"id": offer_id}, {"$set": {"active": active, "updated_at": now_iso()}})
+    await audit(user, "activate" if active else "deactivate", "card_offer", offer_id,
+                None, {"active": active}, request)
+    return {"ok": True}
+
+
 # --------------------------------------------------------------------------
 # Public read endpoints
 # --------------------------------------------------------------------------
@@ -1176,6 +1417,26 @@ async def _load_rates_for(store_id):
     return aff, gc
 
 
+async def _load_card_offers(card_catalog_id, store_id):
+    """Load configured offers for one catalogue card/store and add category names for matching."""
+    if not card_catalog_id or not store_id:
+        return []
+    docs = await db.card_offers.find({
+        "card_id": card_catalog_id,
+        "store_id": store_id,
+        "active": True,
+    }, {"_id": 0}).to_list(500)
+    category_ids = list({doc.get("category_id") for doc in docs if doc.get("category_id")})
+    categories = await db.categories.find(
+        {"id": {"$in": category_ids}}, {"_id": 0, "id": 1, "name": 1}).to_list(500)
+    category_names = {category["id"]: category["name"] for category in categories}
+    for doc in docs:
+        doc["category_name"] = (category_names.get(doc.get("category_id"))
+                                if doc.get("category_id") else "All")
+    return docs
+
+
+
 async def _resolve_store(store_id=None, store_name=None):
     if store_id:
         s = await db.stores.find_one({"id": store_id}, {"_id": 0})
@@ -1204,19 +1465,23 @@ async def calculate(body: CalcBody, request: Request):
     # Optional payment card: must be one of the caller's OWN saved profiles.
     # Guests and no-card requests calculate exactly as before (card=None).
     card = None
+    card_offers = []
     if body.card_id:
         caller = await get_optional_user(request)
         if not caller:
             raise HTTPException(status_code=401, detail="Log in to use a saved card")
         owned = await db.card_profiles.find_one(
             {"id": body.card_id, "user_id": caller["id"]},
-            {"_id": 0, "bank_name": 1, "card_type": 1, "card_network": 1, "card_name": 1})
+            {"_id": 0, "bank_name": 1, "card_type": 1, "card_network": 1,
+             "card_name": 1, "card_catalog_id": 1})
         if not owned:
             raise HTTPException(status_code=404, detail="Card not found")
         card = owned
+        card_offers = await _load_card_offers(card.get("card_catalog_id"), store.get("id"))
 
     result = calculate_stack(store, body.category, body.customer_type, body.mrp,
-                             body.price, aff, gc, rate_version=RATE_VERSION, card=card)
+                             body.price, aff, gc, rate_version=RATE_VERSION, card=card,
+                             card_offers=card_offers)
     result["fallback"] = fallback
 
     # Enrich routes with the partner's website (editable in the console) so the UI
@@ -1492,6 +1757,26 @@ async def feedback(body: FeedbackBody):
             {"$set": {"delivery_status": "sent", "email_id": email_id, "delivered_at": now_iso()}})
         return {"ok": True, "delivery_status": "sent"}
     return {"ok": True, "delivery_status": "not_required"}
+
+
+@api.post("/feedback/result")
+async def submit_result_feedback(body: ResultFeedbackBody, user=Depends(get_current_user)):
+    doc = {
+        "id": str(uuid.uuid4()),
+        "kind": "result_feedback",
+        "user_id": user["id"],
+        "name": user.get("full_name") or user.get("name"),
+        "email": user.get("email"),
+        "sentiment": body.sentiment,
+        "rating": body.rating,
+        "notes": body.notes,
+        "context": body.context.model_dump(exclude_none=True),
+        "timestamp": now_iso(),
+        "status": "new",
+        "delivery_status": "not_required",
+    }
+    await db.feedback.insert_one(dict(doc))
+    return {"ok": True, "feedback_id": doc["id"]}
 
 
 # --------------------------------------------------------------------------
@@ -2788,8 +3073,9 @@ async def get_corrections(user=Depends(require_manage)):
 
 
 @api.get("/admin/feedback")
-async def get_feedback(user=Depends(require_manage)):
-    return await db.feedback.find({}, {"_id": 0}).sort("timestamp", -1).to_list(300)
+async def get_feedback(kind: Optional[str] = None, user=Depends(require_manage)):
+    query = {"kind": kind} if kind else {}
+    return await db.feedback.find(query, {"_id": 0}).sort("timestamp", -1).to_list(300)
 
 
 @api.get("/admin/onboarding")
