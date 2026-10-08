@@ -35,6 +35,12 @@ export default function StorePage() {
 
   const store = current.status === "ready" ? current.store : null;
 
+  // Keep every Store Page CTA store-aware so the Savings Engine
+  // can automatically select this store from its slug.
+  const engineUrl = store
+    ? `/?store=${encodeURIComponent(store.slug || slug)}#engine`
+    : "/#engine";
+
   useMeta(
     store
       ? `Save at ${store.name} | YuktiCart`
@@ -311,7 +317,7 @@ export default function StorePage() {
 
                 <div className="mt-7 flex flex-wrap items-center gap-3">
                   <Link
-                    to="/#engine"
+                    to={engineUrl}
                     data-testid="store-savings-cta"
                     className="btn-gold inline-flex items-center gap-2 rounded-xl px-5 py-3 text-sm font-800 shadow-[0_8px_30px_rgba(245,201,74,0.16)] transition hover:-translate-y-0.5"
                   >
@@ -511,7 +517,7 @@ export default function StorePage() {
               </div>
 
               <Link
-                to="/#engine"
+                to={engineUrl}
                 className="inline-flex w-fit items-center gap-1.5 text-sm font-700 text-gold hover:underline"
               >
                 Open Savings Engine
@@ -602,7 +608,7 @@ export default function StorePage() {
                   </p>
 
                   <Link
-                    to="/#engine"
+                    to={engineUrl}
                     className="btn-gold mt-6 inline-flex items-center gap-2 rounded-xl px-5 py-3 text-sm font-800"
                   >
                     Find Best Savings Stack
@@ -721,7 +727,7 @@ export default function StorePage() {
                 </div>
 
                 <Link
-                  to="/#engine"
+                  to={engineUrl}
                   className="btn-gold inline-flex w-fit shrink-0 items-center gap-2 rounded-xl px-5 py-3 text-sm font-800"
                 >
                   Start Saving
