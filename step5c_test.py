@@ -11,7 +11,7 @@ import string
 from typing import Optional
 
 # Backend URL from frontend/.env
-BASE_URL = "https://cart-phase-audit.preview.emergentagent.com/api"
+BASE_URL = "https://yukticart-audit.preview.emergentagent.com/api"
 
 def random_email():
     """Generate a random email for test shoppers."""

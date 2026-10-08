@@ -57,5 +57,5 @@
   "retest_needed": true,
   "should_main_agent_self_test": false,
   "context_for_next_testing_agent": "Run started from public URL testing with Playwright across desktop/tablet/mobile. All three viewports stuck at wake-up shell. Console repeatedly shows 404 at /undefined/api/health. Static code checks confirm requested Phase 4 presentation changes are implemented in referenced files, but runtime integration behavior (hero controls, links, logo overlay placement, no overflow) could not be asserted on mounted homepage.",
-  "rca of the issue": "Repro: open https://cart-phase-audit.preview.emergentagent.com at 1920/768/390. App remains on wake-up screen and does not transition to homepage. Browser console logs 404 requests to /undefined/api/health, indicating missing/undefined REACT_APP_BACKEND_URL at runtime. Mitigation: restore runtime env injection and warm preview; then rerun focused homepage Playwright validations."
+  "rca of the issue": "Repro: open https://yukticart-audit.preview.emergentagent.com at 1920/768/390. App remains on wake-up screen and does not transition to homepage. Browser console logs 404 requests to /undefined/api/health, indicating missing/undefined REACT_APP_BACKEND_URL at runtime. Mitigation: restore runtime env injection and warm preview; then rerun focused homepage Playwright validations."
 }

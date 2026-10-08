@@ -55,5 +55,5 @@
   "retest_needed": true,
   "should_main_agent_self_test": false,
   "context_for_next_testing_agent": "Added /app/backend/tests/test_phase1a_contact_and_parser.py with 13 passing tests covering contact config/insert ordering, sent/failed delivery states, escaped payload, explicit Both parsing, ambiguous Both+typed NEEDS REVIEW, exact unmatched category handling, and publish guardrail source checks. Public URL still shows wake-up shell and 404 /undefined/api/health in console.",
-  "rca of the issue": "Live UI block reproduction: open https://cart-phase-audit.preview.emergentagent.com => persistent wake-up screen. Console log shows 404 at /undefined/api/health. This prevents route-level Contact/Matrix UI integration verification despite local compile/build and backend isolated tests passing. Mitigation: configure REACT_APP_BACKEND_URL in deployment and warm preview, then rerun Playwright contact/matrix flows."
+  "rca of the issue": "Live UI block reproduction: open https://yukticart-audit.preview.emergentagent.com => persistent wake-up screen. Console log shows 404 at /undefined/api/health. This prevents route-level Contact/Matrix UI integration verification despite local compile/build and backend isolated tests passing. Mitigation: configure REACT_APP_BACKEND_URL in deployment and warm preview, then rerun Playwright contact/matrix flows."
 }

@@ -8,7 +8,7 @@ import json
 import random
 
 # Base URL from frontend/.env
-BASE_URL = "https://cart-phase-audit.preview.emergentagent.com/api"
+BASE_URL = "https://yukticart-audit.preview.emergentagent.com/api"
 
 # Admin credentials from /app/memory/test_credentials.md
 ADMIN_EMAIL = "owner@yukticart.com"
