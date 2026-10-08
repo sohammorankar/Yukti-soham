@@ -26,12 +26,13 @@ export function ResultsView({ result, onBackHome }) {
   return (
     <motion.div
       initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
-      className="grid gap-5 lg:grid-cols-[minmax(0,1.45fr)_minmax(320px,0.9fr)] lg:items-start"
+      className="space-y-6"
       data-testid="results-view"
     >
-      {/* 1 — Savings summary */}
-      <div className="surface relative overflow-hidden rounded-2xl p-6 lg:col-start-1 lg:row-start-1">
-        <div className="flex items-center gap-2">
+      {/* 1 — Understand the saving */}
+      <section className="surface relative overflow-hidden rounded-3xl p-5 sm:p-7">
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-gold/50 to-transparent" />
+        <div className="flex flex-wrap items-center gap-2">
           <StatusIcon className={`h-5 w-5 ${st.color}`} />
           <span className={`text-sm font-600 ${st.color}`} data-testid="result-status">{s.status_label}</span>
           {result.fallback && (
@@ -41,85 +42,107 @@ export function ResultsView({ result, onBackHome }) {
           )}
         </div>
 
-        {/* Selected payment card context (only when the shopper chose one) */}
-        {result.inputs?.card && (
-          <p className="mt-3 flex flex-wrap items-center gap-1.5 text-xs text-ink-muted" data-testid="result-card-used">
-            <CreditCard className="h-3.5 w-3.5 text-gold" />
-            Using {result.inputs.card.card_name || result.inputs.card.bank_name} · {result.inputs.card.card_type} · {result.inputs.card.card_network}
-            {(result.affiliate?.best?.card_rule_applied || result.gift_card?.best?.card_rule_applied) && (
-              <span className="rounded-full bg-savings/15 px-2 py-0.5 text-[10px] font-600 text-savings" data-testid="card-offer-applied">
-                Card offer applied
-              </span>
+        <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.48fr)] lg:items-center">
+          <div className="min-w-0">
+            {result.inputs?.card && (
+              <p className="mb-3 flex flex-wrap items-center gap-1.5 text-xs text-ink-muted" data-testid="result-card-used">
+                <CreditCard className="h-3.5 w-3.5 text-gold" />
+                Using {result.inputs.card.card_name || result.inputs.card.bank_name} · {result.inputs.card.card_type} · {result.inputs.card.card_network}
+                {(result.affiliate?.best?.card_rule_applied || result.gift_card?.best?.card_rule_applied) && (
+                  <span className="rounded-full bg-savings/15 px-2 py-0.5 text-[10px] font-600 text-savings" data-testid="card-offer-applied">
+                    Card offer applied
+                  </span>
+                )}
+              </p>
             )}
-          </p>
-        )}
 
-        <div className="mt-4 flex flex-wrap items-end gap-x-3 gap-y-1">
-          <span className="font-display text-5xl font-700 savings-text" data-testid="result-extra-saved">
-            {money(s.extra_saved)}
-          </span>
-          <span className="pb-1 text-lg text-ink-muted">you save</span>
+            <div className="flex flex-wrap items-end gap-x-3 gap-y-1">
+              <span className="font-display text-5xl font-700 savings-text sm:text-6xl" data-testid="result-extra-saved">
+                {money(s.extra_saved)}
+              </span>
+              <span className="pb-1 text-sm font-700 uppercase tracking-[0.16em] text-ink-muted">you save</span>
+            </div>
+
+            <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3">
+              <Stat icon={Receipt} label="Effective price" value={money(s.final_bill)} testid="result-final-bill" exact={moneyExact(s.final_bill)} />
+              {s.mrp_provided && (
+                <Stat icon={TrendingUp} label="Total off MRP" value={money(s.total_saving)} testid="result-total-saving" exact={moneyExact(s.total_saving)} />
+              )}
+              <Stat icon={Layers} label="Savings boost" value={`${s.boost_percent}%`} testid="result-boost" />
+            </div>
+
+            {!s.mrp_provided && (
+              <p className="mt-3 text-xs text-ink-muted" data-testid="mrp-missing-note">
+                MRP was not provided — MRP-based savings were not calculated.
+              </p>
+            )}
+
+            {savingsConclusion(result) && (
+              <p className="mt-4 max-w-3xl text-sm leading-relaxed text-ink-muted" data-testid="savings-conclusion">
+                {savingsConclusion(result)}
+              </p>
+            )}
+          </div>
+
+          <EmotionalPanel status={s.status} compact />
         </div>
+      </section>
 
-        <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
-          <Stat icon={Receipt} label="Effective price" value={money(s.final_bill)} testid="result-final-bill" exact={moneyExact(s.final_bill)} />
-          {s.mrp_provided && (
-            <Stat icon={TrendingUp} label="Total off MRP" value={money(s.total_saving)} testid="result-total-saving" exact={moneyExact(s.total_saving)} />
-          )}
-          <Stat icon={Layers} label="Savings boost" value={`${s.boost_percent}%`} testid="result-boost" />
-        </div>
-
-        {!s.mrp_provided && (
-          <p className="mt-3 text-xs text-ink-muted" data-testid="mrp-missing-note">
-            MRP was not provided — MRP-based savings were not calculated.
-          </p>
-        )}
-
-        {savingsConclusion(result) && (
-          <p className="mt-5 rounded-lg border border-savings/30 bg-savings/5 p-3 text-sm text-ink" data-testid="savings-conclusion">
-            {savingsConclusion(result)}
-          </p>
-        )}
-      </div>
-
-      {/* 2 — Savings Receipt */}
+      {/* 2–4 — Understand and execute the saving */}
       {s.extra_saved.rupees > 0 && (
-        <div className="lg:col-start-2 lg:row-start-2">
-          <ReceiptStamp result={result} />
-        </div>
-      )}
-
-      {/* 3 — Recommended saving route + partner CTA */}
-      {s.extra_saved.rupees > 0 && (
-        <div className="space-y-4 lg:col-start-1 lg:row-start-2" data-testid="recommended-route">
-          <div className="surface rounded-2xl p-5">
-            <h4 className="font-display text-xl font-700 text-ink" data-testid="route-headline">
-              Ready to save {money(s.extra_saved)}?
-            </h4>
-            <p className="mt-1 text-sm text-ink-muted">
-              YuktiCart recommends this saving route. These are independent third-party partners —
-              YuktiCart doesn&apos;t sell products or issue gift cards; it finds you the best route.
+        <div className="grid gap-5 lg:grid-cols-[minmax(0,1.1fr)_minmax(360px,0.9fr)] lg:items-start">
+          <section className="surface rounded-2xl p-5 sm:p-6" data-testid="recommended-route">
+            <p className="text-xs font-700 uppercase tracking-[0.16em] text-gold">Savings journey</p>
+            <h3 className="mt-2 font-display text-2xl font-700 text-ink" data-testid="route-headline">
+              How to unlock your {money(s.extra_saved)} savings
+            </h3>
+            <p className="mt-2 text-sm leading-relaxed text-ink-muted">
+              Follow the calculated sequence below to execute your savings stack.
             </p>
             {result.checkout_steps?.length > 0 && (
-              <ol className="mt-4 space-y-3" data-testid="checkout-steps">
+              <ol className="mt-6 space-y-4" data-testid="checkout-steps">
                 {result.checkout_steps.map((step, i) => (
-                  <li key={i} className="flex gap-3 text-sm text-ink-muted">
-                    <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full btn-gold text-xs font-700">{i + 1}</span>
-                    <span>{step}</span>
+                  <li key={i} className="flex gap-3 text-sm leading-relaxed text-ink-muted">
+                    <span className="btn-gold grid h-7 w-7 shrink-0 place-items-center rounded-full text-xs font-700">{i + 1}</span>
+                    <span className="pt-0.5">{step}</span>
                   </li>
                 ))}
               </ol>
             )}
-          </div>
+          </section>
 
-          <PartnerSection result={result} side="gift_card" />
-          <PartnerSection result={result} side="affiliate" />
+          <div className="space-y-3">
+            <ReceiptStamp result={result} />
+            <div className="surface rounded-2xl px-5 py-4 text-center" data-testid="feedback-placeholder">
+              <p className="text-sm font-600 text-ink">Was this savings stack helpful?</p>
+              <div className="mt-3 flex justify-center gap-3" aria-label="Feedback coming soon">
+                <button type="button" disabled aria-label="Helpful feedback coming soon"
+                  className="grid h-10 w-12 cursor-not-allowed place-items-center rounded-full border border-border text-lg opacity-70">👍</button>
+                <button type="button" disabled aria-label="Not helpful feedback coming soon"
+                  className="grid h-10 w-12 cursor-not-allowed place-items-center rounded-full border border-border text-lg opacity-70">👎</button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
-      {/* Warnings */}
+      {/* 5 — Existing calculated routes only; future route types can join this section. */}
+      {s.extra_saved.rupees > 0 && (
+        <section className="space-y-4" data-testid="savings-routes">
+          <div>
+            <p className="text-xs font-700 uppercase tracking-[0.16em] text-gold">Your plan</p>
+            <h3 className="mt-1 font-display text-2xl font-700 text-ink">Your Savings Routes</h3>
+            <p className="mt-1 text-sm text-ink-muted">Use the routes selected by the YuktiCart calculation.</p>
+          </div>
+          <div className="flex flex-col gap-4 lg:flex-row">
+            <PartnerSection result={result} side="gift_card" />
+            <PartnerSection result={result} side="affiliate" />
+          </div>
+        </section>
+      )}
+
       {result.warnings?.length > 0 && (
-        <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 lg:col-span-2" data-testid="result-warnings">
+        <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4" data-testid="result-warnings">
           {result.warnings.map((w, i) => (
             <p key={i} className="flex gap-2 text-sm text-amber-300">
               <Info className="mt-0.5 h-4 w-4 shrink-0" /> {w}
@@ -128,12 +151,8 @@ export function ResultsView({ result, onBackHome }) {
         </div>
       )}
 
-      <div className="lg:col-start-2 lg:row-start-1">
-        <EmotionalPanel status={s.status} />
-      </div>
-
       {onBackHome && (
-        <div className="flex justify-center pt-2 lg:col-span-2">
+        <div className="flex justify-center pt-1">
           <button
             type="button"
             onClick={onBackHome}
@@ -164,7 +183,7 @@ function PartnerSection({ result, side }) {
     ? (result.preferred_affiliate_url || preferred.platform_url)
     : preferred.platform_url;
 
-  const label = isAff ? "Cashback partner" : "Gift card partner";
+  const label = isAff ? "Cashback" : "Gift Card";
   const SectionIcon = isAff ? Percent : Gift;
   const verb = isAff ? "Continue with" : "Buy gift card via";
   const sectionTestId = isAff ? "affiliate-partners" : "giftcard-partners";
@@ -182,10 +201,13 @@ function PartnerSection({ result, side }) {
   const bridgeTo = `/go/${slug}?kind=${side}${storeName ? `&store=${encodeURIComponent(storeName)}` : ""}`;
 
   return (
-    <div className="surface rounded-xl p-5" data-testid={sectionTestId}>
+    <div className="surface flex-1 rounded-2xl p-5" data-testid={sectionTestId}>
       <div className="mb-3 flex items-center gap-2">
         <SectionIcon className="h-4 w-4 text-gold" />
-        <h5 className="font-display text-base font-600 text-ink">{label}</h5>
+        <div>
+          <p className="text-[10px] font-700 uppercase tracking-[0.14em] text-ink-muted">Savings route</p>
+          <h5 className="mt-0.5 font-display text-lg font-600 text-ink">{label}</h5>
+        </div>
       </div>
 
       {/* YuktiCart-suggested partner header + the ONLY actionable redirect CTA */}
