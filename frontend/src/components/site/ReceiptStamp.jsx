@@ -3,21 +3,21 @@ import { BadgeCheck } from "lucide-react";
 import { money } from "@/lib/format";
 
 // Savings Receipt — the first meaningful result after the YuktiMagic transition.
-// Shows a consumer-friendly breakdown from the real calculation. A single
-// "YUKTI APPROVED" stamp plays once on mount; there are NO replay controls.
+// Shows a consumer-friendly breakdown from the real calculation with a CSS-only
+// YuktiCart approval stamp. There are no replay controls or generated assets.
 export function ReceiptStamp({ result }) {
   const s = result.summary;
   const aff = result.affiliate?.applied && result.affiliate?.best;
   const gc = result.gift_card?.applied && result.gift_card?.best;
 
   return (
-    <div className="surface relative overflow-hidden rounded-2xl p-5" data-testid="receipt-stamp">
-      <div className="mb-3 flex items-center gap-1.5 text-xs font-600 uppercase tracking-widest text-gold">
-        <BadgeCheck className="h-4 w-4" /> Yukti Approved savings
+    <div className="relative overflow-hidden rounded-3xl border border-gold/30 bg-[radial-gradient(circle_at_85%_10%,var(--glow),transparent_36%),var(--surface)] p-4 shadow-[0_20px_60px_rgba(0,0,0,0.18)] sm:p-6" data-testid="receipt-stamp">
+      <div className="mb-4 flex items-center gap-1.5 text-xs font-700 uppercase tracking-[0.16em] text-gold">
+        <BadgeCheck className="h-4 w-4" /> YuktiCart Savings Receipt
       </div>
 
-      <div className="receipt-rise relative mx-auto max-w-sm">
-        <div className="relative overflow-hidden rounded-md bg-[#faf7ef] px-5 py-6 text-[#1a1712] shadow-lg"
+      <div className="receipt-rise relative mx-auto max-w-lg">
+        <div className="relative overflow-hidden rounded-lg border border-[#ded6c5] bg-[#faf7ef] px-5 py-6 text-[#1a1712] shadow-xl sm:px-6"
           style={{ fontFamily: "'Manrope',sans-serif" }}>
           <div className="mb-3 border-b border-dashed border-[#c9c0ac] pb-3 text-center">
             <div className="font-display text-sm font-700 tracking-wide">YUKTICART · SAVINGS RECEIPT</div>
@@ -38,12 +38,12 @@ export function ReceiptStamp({ result }) {
             Estimated savings · verify retailer terms before purchase
           </div>
 
-          {/* One-time YUKTI APPROVED stamp (concept 1) — corner placement keeps all rows readable */}
-          <div className="stamp-drop pointer-events-none absolute right-2 top-2 -rotate-12 opacity-95" aria-hidden>
-            <div className="rounded-md border-[2.5px] border-[#c0392b] px-2.5 py-1 text-center text-[#c0392b]"
-              style={{ background: "rgba(192,57,43,0.05)" }}>
-              <div className="font-display text-xs font-700 leading-none">YUKTI</div>
-              <div className="font-display text-xs font-700 leading-none">APPROVED</div>
+          {/* CSS-only approval stamp; kept in document flow so receipt values remain clear. */}
+          <div className="mt-4 flex justify-end pr-1" aria-hidden>
+            <div className="-rotate-6 rounded-md border-[2.5px] border-double border-[#b52f25] px-3 py-1.5 text-center text-[#b52f25] opacity-90"
+              style={{ background: "rgba(181,47,37,0.035)", boxShadow: "inset 0 0 0 1px rgba(181,47,37,0.18)" }}>
+              <div className="font-display text-[11px] font-700 leading-none tracking-wide">YUKTICART APPROVED</div>
+              <div className="mt-1 text-[8px] font-800 leading-none tracking-[0.2em]">SAVINGS STACK</div>
             </div>
           </div>
         </div>
