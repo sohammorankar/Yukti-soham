@@ -252,14 +252,134 @@ def best_rule_for_side(rules, price, product_category, customer_type, today=None
     return winner, evaluated
 
 
+
+# --------------------------------------------------------------------------
+# Independent card-offer eligibility + application
+# --------------------------------------------------------------------------
+
+def card_offer_is_eligible(offer, store, product_category, customer_type, price,
+                           card, today=None):
+    """Validate one merchant/card offer without changing existing rate rules."""
+    reasons = []
+    today = today or datetime.now(timezone.utc).date()
+    if isinstance(today, datetime):
+        today = today.date()
+
+    if not offer.get("active", False):
+        reasons.append("Offer is not active")
+    if offer.get("store_id") != (store or {}).get("id"):
+        reasons.append("Store does not match")
+    if offer.get("card_id") != (card or {}).get("card_catalog_id"):
+        reasons.append("Card does not match")
+
+    valid_from = _parse_date(offer.get("valid_from"))
+    valid_until = _parse_date(offer.get("valid_until"))
+    if valid_from and today < valid_from:
+        reasons.append("Offer is not yet valid")
+    if valid_until and today > valid_until:
+        reasons.append("Offer has expired")
+
+    minimum = offer.get("minimum_order_value")
+    if minimum not in (None, "") and D(price) < D(minimum):
+        reasons.append(f"Order below minimum order value (₹{q(minimum)})")
+
+    if offer.get("category_id") and not offer.get("category_name"):
+        reasons.append("Offer category reference is unavailable")
+    else:
+        offer_category = offer.get("category_name") or "All"
+        if not category_matches(offer_category, product_category):
+            reasons.append("Category does not match")
+
+    offer_customer = (offer.get("customer_type") or "both").lower()
+    if offer_customer not in ("both", (customer_type or "existing").lower()):
+        reasons.append("Customer type does not match")
+
+    payment_method = (offer.get("payment_method") or "both").lower()
+    card_type = (card or {}).get("card_type", "").lower()
+    if payment_method != "both" and payment_method != card_type:
+        reasons.append("Card payment method does not match")
+
+    return len(reasons) == 0, reasons
+
+
+def apply_card_offer(offer, price):
+    """Calculate one card benefit with eligible-spend and payout caps kept distinct."""
+    price = D(price)
+    eligible_cap = offer.get("maximum_eligible_amount")
+    applied_to = min(price, D(eligible_cap)) if eligible_cap not in (None, "") else price
+    if offer.get("discount_type") == "percentage":
+        amount = applied_to * D(offer.get("discount_value")) / Decimal("100")
+    else:
+        amount = D(offer.get("discount_value"))
+    discount_cap = offer.get("maximum_discount_amount")
+    if discount_cap not in (None, ""):
+        amount = min(amount, D(discount_cap))
+    return q(min(price, max(ZERO, amount))), q(applied_to)
+
+
+def best_card_stack(card_offers, store, product_category, customer_type, price,
+                    card, affiliate_saving, gift_card_saving,
+                    affiliate_gift_card_stackable, today=None):
+    """Evaluate each offer independently and return the strongest allowed combination."""
+    evaluated = []
+    candidates = []
+    for offer in card_offers or []:
+        eligible, reasons = card_offer_is_eligible(
+            offer, store, product_category, customer_type, price, card, today)
+        saving, applied_to = apply_card_offer(offer, price) if eligible else (ZERO, ZERO)
+        entry = {
+            "offer": offer,
+            "eligible": eligible,
+            "reasons": reasons,
+            "saving": saving,
+            "applied_to": applied_to,
+        }
+        evaluated.append(entry)
+        if not eligible or saving <= 0:
+            continue
+
+        stackability = offer.get("stackability") or {}
+        combinations = [(saving, False, False)]
+        if stackability.get("affiliate") and affiliate_saving > 0:
+            combinations.append((saving + affiliate_saving, True, False))
+        if stackability.get("gift_card") and gift_card_saving > 0:
+            combinations.append((saving + gift_card_saving, False, True))
+        if (stackability.get("affiliate") and stackability.get("gift_card")
+                and affiliate_gift_card_stackable):
+            combinations.append((saving + affiliate_saving + gift_card_saving, True, True))
+
+        total, use_affiliate, use_gift_card = max(combinations, key=lambda item: item[0])
+        category_specific = int((offer.get("category_name") or "All").lower() != "all")
+        customer_specific = int((offer.get("customer_type") or "both").lower() != "both")
+        rank = (
+            min(D(price), total),
+            category_specific,
+            customer_specific,
+            int(offer.get("priority") or 0),
+            (_parse_date(offer.get("valid_from")) or date.min).toordinal(),
+            str(offer.get("id") or ""),
+        )
+        candidates.append({
+            "entry": entry,
+            "total": min(D(price), total),
+            "use_affiliate": use_affiliate,
+            "use_gift_card": use_gift_card,
+            "rank": rank,
+        })
+
+    winner = max(candidates, key=lambda item: item["rank"]) if candidates else None
+    return winner, evaluated
+
+
 def calculate_stack(store, product_category, customer_type, mrp, price,
                     affiliate_rules, giftcard_rules, today=None, rate_version="v1",
-                    card=None, product_url=None, gift_card_denominations=None):
+                    card=None, product_url=None, gift_card_denominations=None,
+                    card_offers=None):
     """Full stacking calculation. Returns a JSON-serializable dict.
 
-    card: optional shopper card profile {bank_name, card_type, card_network}.
-    Only rates that declare a card_eligibility rule are affected by it; all
-    other rates (and the no-card case) behave exactly as before.
+    card: optional shopper card profile {bank_name, card_type, card_network,
+    card_catalog_id}. Existing rate-card eligibility remains unchanged. Independent
+    card_offers are evaluated only when a catalogue-backed saved card is supplied.
     """
     price = D(price)
     mrp_provided = mrp is not None and str(mrp) != ""
@@ -288,26 +408,50 @@ def calculate_stack(store, product_category, customer_type, mrp, price,
     # A valid split-payment exception requires split tender to be supported (not "no")
     split_exception_valid = partial_gift_card and split_supported != "no"
 
-    double_stack = (
+    affiliate_gift_card_stackable = (
         cashback_saving > 0 and giftcard_saving > 0 and
         (stacking != "not_allowed" or split_exception_valid)
     )
 
-    if double_stack:
+    if affiliate_gift_card_stackable:
         extra_saved = cashback_saving + giftcard_saving
     else:
         extra_saved = max(cashback_saving, giftcard_saving)
+
+    # Preserve the existing winner as the baseline, then replace it only when an
+    # eligible configured card offer produces a strictly better valid stack.
+    applied_route = None
+    if not affiliate_gift_card_stackable and extra_saved > 0:
+        applied_route = "affiliate" if cashback_saving >= giftcard_saving else "gift_card"
+    affiliate_applied = bool(affiliate_gift_card_stackable or applied_route == "affiliate")
+    gift_card_applied = bool(affiliate_gift_card_stackable or applied_route == "gift_card")
+
+    card_choice, card_evaluated = best_card_stack(
+        card_offers, store, product_category, customer_type, price, card,
+        cashback_saving, giftcard_saving, affiliate_gift_card_stackable, today)
+    card_offer_applied = bool(card_choice and card_choice["total"] > extra_saved)
+    if card_offer_applied:
+        extra_saved = card_choice["total"]
+        affiliate_applied = card_choice["use_affiliate"]
+        gift_card_applied = card_choice["use_gift_card"]
+        if affiliate_applied and gift_card_applied:
+            applied_route = "card_affiliate_gift_card"
+        elif affiliate_applied:
+            applied_route = "card_affiliate"
+        elif gift_card_applied:
+            applied_route = "card_gift_card"
+        else:
+            applied_route = "card_offer"
+
+    # double_stack retains its established meaning: affiliate + gift card are
+    # both part of the selected result, whether or not a card offer also applies.
+    double_stack = bool(affiliate_applied and gift_card_applied)
 
     final_bill = max(ZERO, price - extra_saved)
     retail_saving = (max(ZERO, mrp - price) if mrp_provided else ZERO)
     total_saving = retail_saving + extra_saved
     total_saving_percent = (total_saving / mrp * Decimal("100")) if (mrp_provided and mrp > 0) else ZERO
     boost_percent = (extra_saved / price * Decimal("100")) if price > 0 else ZERO
-
-    # Determine which route was applied when not stacking
-    applied_route = None
-    if not double_stack and extra_saved > 0:
-        applied_route = "affiliate" if cashback_saving >= giftcard_saving else "gift_card"
 
     # Verification warnings
     warnings = []
@@ -332,7 +476,8 @@ def calculate_stack(store, product_category, customer_type, mrp, price,
         warnings.append("This store does not allow stacking; only the valid split-payment exception is applied.")
 
     # Status
-    if double_stack:
+    applied_component_count = int(affiliate_applied) + int(gift_card_applied) + int(card_offer_applied)
+    if applied_component_count >= 2:
         status = "great_stack"
         status_label = "Great stack"
     elif extra_saved > 0:
@@ -387,6 +532,44 @@ def calculate_stack(store, product_category, customer_type, mrp, price,
             "options": options,
         }
 
+    def card_offer_option(entry):
+        offer = entry["offer"]
+        return {
+            "offer_id": offer.get("id"),
+            "offer_name": offer.get("offer_name"),
+            "offer_type": offer.get("offer_type"),
+            "discount_type": offer.get("discount_type"),
+            "discount_value": str(q(offer.get("discount_value"))),
+            "saving": money_out(entry["saving"]),
+            "applied_to": money_out(entry["applied_to"]),
+            "minimum_order_value": offer.get("minimum_order_value"),
+            "maximum_discount_amount": offer.get("maximum_discount_amount"),
+            "maximum_eligible_amount": offer.get("maximum_eligible_amount"),
+            "payment_method": offer.get("payment_method"),
+            "customer_type": offer.get("customer_type"),
+            "category_name": offer.get("category_name") or "All",
+            "stackability": offer.get("stackability") or {},
+            "priority": offer.get("priority", 0),
+            "valid_from": offer.get("valid_from"),
+            "valid_until": offer.get("valid_until"),
+            "eligibility_notes": offer.get("eligibility_notes"),
+            "notes": offer.get("notes"),
+            "eligible": entry["eligible"],
+            "reasons": entry["reasons"],
+            "is_applied": bool(card_offer_applied and card_choice and card_choice["entry"] is entry),
+        }
+
+    card_offer_options = [card_offer_option(entry) for entry in card_evaluated]
+    card_offer_best = (card_offer_option(card_choice["entry"]) if card_choice else None)
+    card_offer = {
+        "has_winner": bool(card_choice),
+        "applied": card_offer_applied,
+        "best": card_offer_best,
+        "applied_offer": card_offer_best if card_offer_applied else None,
+        "card_name": (card or {}).get("card_name"),
+        "options": card_offer_options,
+    }
+
     affiliate = route_payload(aff_winner, aff_eval, "affiliate")
     gift_card = route_payload(gc_winner, gc_eval, "gift_card")
     gift_card["denomination_status"] = ("unavailable" if giftcard_rules and gift_card_denominations == []
@@ -394,9 +577,9 @@ def calculate_stack(store, product_category, customer_type, mrp, price,
     gift_card["available_denominations"] = ([money_out(amount) for amount in gift_card_denominations]
                                               if gift_card_denominations is not None else None)
 
-    # Mark applied vs skipped for the single-route case
-    affiliate["applied"] = bool(double_stack or applied_route == "affiliate")
-    gift_card["applied"] = bool(double_stack or applied_route == "gift_card")
+    # Mark only the components selected by the winning comparison.
+    affiliate["applied"] = affiliate_applied
+    gift_card["applied"] = gift_card_applied
     affiliate["skipped"] = bool(affiliate["has_winner"] and not affiliate["applied"])
     gift_card["skipped"] = bool(gift_card["has_winner"] and not gift_card["applied"])
 
@@ -426,6 +609,7 @@ def calculate_stack(store, product_category, customer_type, mrp, price,
                 "card_type": card.get("card_type"),
                 "card_network": card.get("card_network"),
                 "card_name": card.get("card_name"),
+                "card_catalog_id": card.get("card_catalog_id"),
             } if card else None),
             "mrp": money_out(mrp) if mrp_provided else None,
             "price": money_out(price),
@@ -450,9 +634,18 @@ def calculate_stack(store, product_category, customer_type, mrp, price,
             "gift_card_spend": money_out(giftcard_spend) if gc_winner else None,
             "other_payment_spend": money_out(other_payment_spend) if gc_winner else None,
             "applied_route": applied_route,
+            **({
+                "card_offer_applied": card_offer_applied,
+                "applied_components": [name for name, applied in (
+                    ("affiliate", affiliate_applied),
+                    ("gift_card", gift_card_applied),
+                    ("card_offer", card_offer_applied),
+                ) if applied],
+            } if card else {}),
         },
         "affiliate": affiliate,
         "gift_card": gift_card,
+        **({"card_offer": card_offer} if card else {}),
         "checkout_steps": checkout_steps,
         "warnings": warnings,
     }
