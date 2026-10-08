@@ -259,45 +259,66 @@ def best_rule_for_side(rules, price, product_category, customer_type, today=None
 
 def card_offer_is_eligible(offer, store, product_category, customer_type, price,
                            card, today=None):
-    """Validate one merchant/card offer without changing existing rate rules."""
+    """Validate one merchant/card offer; explicit card exclusions always win."""
     reasons = []
     today = today or datetime.now(timezone.utc).date()
     if isinstance(today, datetime):
         today = today.date()
 
     if not offer.get("active", False):
-        reasons.append("Offer is not active")
+        reasons.append("inactive")
     if offer.get("store_id") != (store or {}).get("id"):
-        reasons.append("Store does not match")
-    if offer.get("card_id") != (card or {}).get("card_catalog_id"):
-        reasons.append("Card does not match")
+        reasons.append("store_mismatch")
+
+    card_catalog_id = (card or {}).get("card_catalog_id")
+    if not card_catalog_id:
+        reasons.append("catalogue_card_required")
+    excluded_card_ids = set(offer.get("excluded_card_ids") or [])
+    if card_catalog_id in excluded_card_ids:
+        reasons.append("explicitly_excluded")
+
+    scope = offer.get("eligibility_scope")
+    if scope == "specific_cards":
+        allowed_card_ids = set(offer.get("eligible_card_ids") or [])
+        if not allowed_card_ids and offer.get("card_id"):
+            allowed_card_ids.add(offer["card_id"])
+        if card_catalog_id not in allowed_card_ids:
+            reasons.append("card_not_in_allowed_list")
+    elif scope == "issuer":
+        if _norm_text((card or {}).get("bank_name")) != _norm_text(offer.get("issuer")):
+            reasons.append("issuer_mismatch")
+    elif scope == "all_eligible_cards":
+        pass
+    elif offer.get("card_id") != card_catalog_id:
+        # Backward compatibility for Phase 3A records without eligibility_scope.
+        reasons.append("card_mismatch")
 
     valid_from = _parse_date(offer.get("valid_from"))
     valid_until = _parse_date(offer.get("valid_until"))
     if valid_from and today < valid_from:
-        reasons.append("Offer is not yet valid")
+        reasons.append("not_yet_valid")
     if valid_until and today > valid_until:
-        reasons.append("Offer has expired")
+        reasons.append("expired")
 
     minimum = offer.get("minimum_order_value")
     if minimum not in (None, "") and D(price) < D(minimum):
-        reasons.append(f"Order below minimum order value (₹{q(minimum)})")
+        reasons.append("minimum_order_not_met")
 
     if offer.get("category_id") and not offer.get("category_name"):
-        reasons.append("Offer category reference is unavailable")
+        reasons.append("category_reference_unavailable")
     else:
         offer_category = offer.get("category_name") or "All"
         if not category_matches(offer_category, product_category):
-            reasons.append("Category does not match")
+            reasons.append("category_mismatch")
 
     offer_customer = (offer.get("customer_type") or "both").lower()
     if offer_customer not in ("both", (customer_type or "existing").lower()):
-        reasons.append("Customer type does not match")
+        reasons.append("customer_type_mismatch")
 
     payment_method = (offer.get("payment_method") or "both").lower()
     card_type = (card or {}).get("card_type", "").lower()
     if payment_method != "both" and payment_method != card_type:
-        reasons.append("Card payment method does not match")
+        reasons.append("payment_method_mismatch")
 
     return len(reasons) == 0, reasons
 
@@ -546,6 +567,10 @@ def calculate_stack(store, product_category, customer_type, mrp, price,
             "maximum_discount_amount": offer.get("maximum_discount_amount"),
             "maximum_eligible_amount": offer.get("maximum_eligible_amount"),
             "payment_method": offer.get("payment_method"),
+            "eligibility_scope": offer.get("eligibility_scope") or "legacy_specific_card",
+            "eligible_card_ids": offer.get("eligible_card_ids") or [],
+            "excluded_card_ids": offer.get("excluded_card_ids") or [],
+            "issuer": offer.get("issuer"),
             "customer_type": offer.get("customer_type"),
             "category_name": offer.get("category_name") or "All",
             "stackability": offer.get("stackability") or {},

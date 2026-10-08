@@ -388,7 +388,11 @@ class CardOfferBody(BaseModel):
     current savings engine and reference existing catalogue/store identities."""
     model_config = {"extra": "forbid"}
 
-    card_id: str = Field(min_length=1, max_length=100)
+    card_id: Optional[str] = Field(default=None, max_length=100)
+    eligibility_scope: Optional[Literal["specific_cards", "issuer", "all_eligible_cards"]] = None
+    eligible_card_ids: List[str] = Field(default_factory=list, max_length=500)
+    excluded_card_ids: List[str] = Field(default_factory=list, max_length=500)
+    issuer: Optional[str] = Field(default=None, max_length=100)
     store_id: str = Field(min_length=1, max_length=100)
     offer_name: str = Field(min_length=1, max_length=160)
     offer_type: Literal["instant_discount", "cashback", "reward", "other"]
@@ -412,13 +416,23 @@ class CardOfferBody(BaseModel):
     promotion_description: Optional[str] = Field(default=None, max_length=1000)
     promotion_cta_label: Optional[str] = Field(default=None, max_length=80)
 
-    @field_validator("card_id", "store_id")
+    @field_validator("store_id")
     @classmethod
     def clean_card_offer_reference(cls, value):
         value = value.strip()
         if not value:
             raise ValueError("Reference is required")
         return value
+
+    @field_validator("card_id", "issuer")
+    @classmethod
+    def clean_optional_card_offer_reference(cls, value):
+        return value.strip() if value and value.strip() else None
+
+    @field_validator("eligible_card_ids", "excluded_card_ids")
+    @classmethod
+    def clean_card_offer_card_lists(cls, values):
+        return list(dict.fromkeys(value.strip() for value in values if value and value.strip()))
 
     @field_validator("category_id")
     @classmethod
@@ -476,6 +490,12 @@ class CardOfferBody(BaseModel):
             raise ValueError("Percentage discount cannot exceed 100")
         if self.valid_from and self.valid_until and self.valid_until < self.valid_from:
             raise ValueError("Valid until must be on or after valid from")
+        if self.eligibility_scope == "specific_cards" and not (self.eligible_card_ids or self.card_id):
+            raise ValueError("Choose at least one eligible card")
+        if self.eligibility_scope == "issuer" and not self.issuer:
+            raise ValueError("Issuer is required for issuer eligibility")
+        if self.eligibility_scope is None and not self.card_id:
+            raise ValueError("Legacy card offers require card_id")
         return self
 
 
@@ -1087,9 +1107,20 @@ async def admin_activate_catalogue_card(cid: str, body: dict, request: Request, 
 
 
 async def _validate_card_offer_references(body: CardOfferBody):
-    card = await db.card_catalogue.find_one({"id": body.card_id}, {"_id": 0})
-    if not card:
-        raise HTTPException(400, "Selected catalogue card does not exist")
+    referenced_card_ids = set(body.eligible_card_ids) | set(body.excluded_card_ids)
+    if body.card_id:
+        referenced_card_ids.add(body.card_id)
+    cards = await db.card_catalogue.find(
+        {"id": {"$in": list(referenced_card_ids)}}, {"_id": 0, "id": 1}).to_list(1000)
+    found_card_ids = {card["id"] for card in cards}
+    missing_card_ids = referenced_card_ids - found_card_ids
+    if missing_card_ids:
+        raise HTTPException(400, "One or more selected catalogue cards do not exist")
+    if body.eligibility_scope == "issuer":
+        issuer_exists = await db.card_catalogue.find_one(
+            {"bank_name": re.compile(f"^{re.escape(body.issuer)}$", re.I)}, {"_id": 0, "id": 1})
+        if not issuer_exists:
+            raise HTTPException(400, "Selected issuer is not represented in the card catalogue")
     store = await db.stores.find_one({"id": body.store_id}, {"_id": 0})
     if not store:
         raise HTTPException(400, "Selected store does not exist")
@@ -1098,17 +1129,23 @@ async def _validate_card_offer_references(body: CardOfferBody):
         category = await db.categories.find_one({"id": body.category_id}, {"_id": 0})
         if not category:
             raise HTTPException(400, "Selected category does not exist")
-    return card, store, category
+    return cards, store, category
 
 
 async def _enrich_card_offers(docs: list) -> list:
     if not docs:
         return docs
-    card_ids = list({doc["card_id"] for doc in docs})
+    card_ids = set()
+    for doc in docs:
+        if doc.get("card_id"):
+            card_ids.add(doc["card_id"])
+        card_ids.update(doc.get("eligible_card_ids") or [])
+        card_ids.update(doc.get("excluded_card_ids") or [])
     store_ids = list({doc["store_id"] for doc in docs})
     category_ids = list({doc.get("category_id") for doc in docs if doc.get("category_id")})
     cards = await db.card_catalogue.find(
-        {"id": {"$in": card_ids}}, {"_id": 0, "id": 1, "bank_name": 1, "card_name": 1}).to_list(1000)
+        {"id": {"$in": list(card_ids)}},
+        {"_id": 0, "id": 1, "bank_name": 1, "card_name": 1}).to_list(1000)
     stores = await db.stores.find(
         {"id": {"$in": store_ids}}, {"_id": 0, "id": 1, "name": 1}).to_list(1000)
     categories = await db.categories.find(
@@ -1117,9 +1154,22 @@ async def _enrich_card_offers(docs: list) -> list:
     store_map = {item["id"]: item for item in stores}
     category_map = {item["id"]: item for item in categories}
     for doc in docs:
-        card = card_map.get(doc["card_id"], {})
-        doc["card_name"] = card.get("card_name") or "Unknown card"
-        doc["bank_name"] = card.get("bank_name")
+        scope = doc.get("eligibility_scope")
+        eligible_ids = doc.get("eligible_card_ids") or ([doc["card_id"]] if doc.get("card_id") else [])
+        excluded_ids = doc.get("excluded_card_ids") or []
+        legacy_card = card_map.get(doc.get("card_id"), {})
+        doc["card_name"] = legacy_card.get("card_name")
+        doc["bank_name"] = legacy_card.get("bank_name")
+        doc["eligible_card_names"] = [card_map[cid]["card_name"] for cid in eligible_ids if cid in card_map]
+        doc["excluded_card_names"] = [card_map[cid]["card_name"] for cid in excluded_ids if cid in card_map]
+        if scope == "issuer":
+            doc["eligibility_summary"] = f'{doc.get("issuer")} cards'
+        elif scope == "all_eligible_cards":
+            doc["eligibility_summary"] = "All eligible cards"
+        elif scope == "specific_cards":
+            doc["eligibility_summary"] = f"{len(eligible_ids)} specific card{'s' if len(eligible_ids) != 1 else ''}"
+        else:
+            doc["eligibility_summary"] = legacy_card.get("card_name") or "Legacy specific card"
         doc["store_name"] = store_map.get(doc["store_id"], {}).get("name") or "Unknown store"
         doc["category_name"] = category_map.get(doc.get("category_id"), {}).get("name") or "All categories"
     return docs
@@ -1417,12 +1467,11 @@ async def _load_rates_for(store_id):
     return aff, gc
 
 
-async def _load_card_offers(card_catalog_id, store_id):
-    """Load configured offers for one catalogue card/store and add category names for matching."""
-    if not card_catalog_id or not store_id:
+async def _load_card_offers(store_id):
+    """Load active offers for a store; the engine applies card scope and exclusions."""
+    if not store_id:
         return []
     docs = await db.card_offers.find({
-        "card_id": card_catalog_id,
         "store_id": store_id,
         "active": True,
     }, {"_id": 0}).to_list(500)
@@ -1477,7 +1526,7 @@ async def calculate(body: CalcBody, request: Request):
         if not owned:
             raise HTTPException(status_code=404, detail="Card not found")
         card = owned
-        card_offers = await _load_card_offers(card.get("card_catalog_id"), store.get("id"))
+        card_offers = await _load_card_offers(store.get("id"))
 
     result = calculate_stack(store, body.category, body.customer_type, body.mrp,
                              body.price, aff, gc, rate_version=RATE_VERSION, card=card,
