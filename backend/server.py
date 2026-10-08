@@ -435,6 +435,47 @@ class FeedbackBody(BaseModel):
         return self
 
 
+class ResultFeedbackContext(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    store_id: Optional[str] = Field(default=None, max_length=80)
+    store_name: Optional[str] = Field(default=None, max_length=100)
+    store_slug: Optional[str] = Field(default=None, max_length=120)
+    category: Optional[str] = Field(default=None, max_length=100)
+    order_value: Optional[str] = Field(default=None, max_length=32)
+    total_saving: Optional[str] = Field(default=None, max_length=32)
+    effective_price: Optional[str] = Field(default=None, max_length=32)
+    gift_card_saving: Optional[str] = Field(default=None, max_length=32)
+    cashback_saving: Optional[str] = Field(default=None, max_length=32)
+    calculation_id: Optional[str] = Field(default=None, max_length=100)
+    rate_version: Optional[str] = Field(default=None, max_length=40)
+
+    @field_validator("order_value", "total_saving", "effective_price", "gift_card_saving", "cashback_saving")
+    @classmethod
+    def validate_money_text(cls, value):
+        if value is None:
+            return None
+        value = value.strip()
+        if not re.fullmatch(r"\d{1,12}(?:\.\d{1,2})?", value):
+            raise ValueError("must be a non-negative money value")
+        return value
+
+
+class ResultFeedbackBody(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    sentiment: Literal["positive", "negative"]
+    rating: int = Field(ge=1, le=5)
+    notes: str = Field(default="", max_length=1500)
+    context: ResultFeedbackContext = Field(default_factory=ResultFeedbackContext)
+
+    @field_validator("notes")
+    @classmethod
+    def clean_result_feedback_notes(cls, value):
+        return value.strip()
+
+
+
 class HomepageCategoryBody(BaseModel):
     """Editorial discovery taxonomy; never used for affiliate rate matching."""
     model_config = {"extra": "forbid"}
@@ -1492,6 +1533,26 @@ async def feedback(body: FeedbackBody):
             {"$set": {"delivery_status": "sent", "email_id": email_id, "delivered_at": now_iso()}})
         return {"ok": True, "delivery_status": "sent"}
     return {"ok": True, "delivery_status": "not_required"}
+
+
+@api.post("/feedback/result")
+async def submit_result_feedback(body: ResultFeedbackBody, user=Depends(get_current_user)):
+    doc = {
+        "id": str(uuid.uuid4()),
+        "kind": "result_feedback",
+        "user_id": user["id"],
+        "name": user.get("full_name") or user.get("name"),
+        "email": user.get("email"),
+        "sentiment": body.sentiment,
+        "rating": body.rating,
+        "notes": body.notes,
+        "context": body.context.model_dump(exclude_none=True),
+        "timestamp": now_iso(),
+        "status": "new",
+        "delivery_status": "not_required",
+    }
+    await db.feedback.insert_one(dict(doc))
+    return {"ok": True, "feedback_id": doc["id"]}
 
 
 # --------------------------------------------------------------------------
@@ -2788,8 +2849,9 @@ async def get_corrections(user=Depends(require_manage)):
 
 
 @api.get("/admin/feedback")
-async def get_feedback(user=Depends(require_manage)):
-    return await db.feedback.find({}, {"_id": 0}).sort("timestamp", -1).to_list(300)
+async def get_feedback(kind: Optional[str] = None, user=Depends(require_manage)):
+    query = {"kind": kind} if kind else {}
+    return await db.feedback.find(query, {"_id": 0}).sort("timestamp", -1).to_list(300)
 
 
 @api.get("/admin/onboarding")

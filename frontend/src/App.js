@@ -33,6 +33,7 @@ import Matrix from "@/pages/admin/Matrix";
 import Audit from "@/pages/admin/Audit";
 import CardCatalogue from "@/pages/admin/CardCatalogue";
 import AffiliateDestinations from "@/pages/admin/AffiliateDestinations";
+import UserFeedback from "@/pages/admin/UserFeedback";
 
 export default function App() {
   return (
@@ -82,6 +83,7 @@ export default function App() {
               <Route path="affiliate-destinations" element={<AffiliateDestinations />} />
               <Route path="cards" element={<CardCatalogue />} />
               <Route path="audit" element={<Audit />} />
+              <Route path="user-feedback" element={<UserFeedback />} />
             </Route>
             </Routes>
             <Toaster position="top-center" richColors />

@@ -8,6 +8,7 @@ import {
 import { money, moneyExact } from "@/lib/format";
 import { EmotionalPanel } from "@/components/site/EmotionalPanel";
 import { ReceiptStamp } from "@/components/site/ReceiptStamp";
+import { ResultFeedback } from "@/components/site/ResultFeedback";
 
 const STATUS_STYLE = {
   great_stack: { color: "text-savings", icon: CheckCircle2 },
@@ -22,6 +23,15 @@ export function ResultsView({ result, onBackHome }) {
   const s = result.summary;
   const st = STATUS_STYLE[s.status] || STATUS_STYLE.no_saving;
   const StatusIcon = st.icon;
+  const feedbackKey = [
+    result.inputs?.store,
+    result.inputs?.category,
+    result.inputs?.price?.exact,
+    s.extra_saved?.exact,
+    s.final_bill?.exact,
+    result.gift_card?.best?.rate_id,
+    result.affiliate?.best?.rate_id,
+  ].filter(Boolean).join("|");
 
   return (
     <motion.div
@@ -113,15 +123,7 @@ export function ResultsView({ result, onBackHome }) {
 
           <div className="space-y-3">
             <ReceiptStamp result={result} />
-            <div className="surface rounded-2xl px-5 py-4 text-center" data-testid="feedback-placeholder">
-              <p className="text-sm font-600 text-ink">Was this savings stack helpful?</p>
-              <div className="mt-3 flex justify-center gap-3" aria-label="Feedback coming soon">
-                <button type="button" disabled aria-label="Helpful feedback coming soon"
-                  className="grid h-10 w-12 cursor-not-allowed place-items-center rounded-full border border-border text-lg opacity-70">👍</button>
-                <button type="button" disabled aria-label="Not helpful feedback coming soon"
-                  className="grid h-10 w-12 cursor-not-allowed place-items-center rounded-full border border-border text-lg opacity-70">👎</button>
-              </div>
-            </div>
+            <ResultFeedback key={feedbackKey} result={result} />
           </div>
         </div>
       )}
