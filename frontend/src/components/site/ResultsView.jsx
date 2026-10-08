@@ -23,6 +23,23 @@ export function ResultsView({ result, onBackHome }) {
   const s = result.summary;
   const st = STATUS_STYLE[s.status] || STATUS_STYLE.no_saving;
   const StatusIcon = st.icon;
+  const cardOptimization = result.card_optimization || {};
+  const savedCardsChecked = cardOptimization.saved_cards_checked || 0;
+  const winningCardName = cardOptimization.selected_card_name || result.inputs?.card?.card_name || result.card_offer?.card_name;
+  const winningCardIssuer = cardOptimization.selected_card_issuer || result.inputs?.card?.bank_name;
+  const appliedCardOffer = result.card_offer?.applied ? result.card_offer?.applied_offer : null;
+  const cardEligibilityApplied = Boolean(
+    (result.affiliate?.applied && result.affiliate?.best?.card_rule_applied)
+    || (result.gift_card?.applied && result.gift_card?.best?.card_rule_applied)
+  );
+  const winningCardUsed = Boolean(winningCardName && (
+    appliedCardOffer || cardEligibilityApplied || cardOptimization.mode === "automatic"
+  ));
+  const winningRouteParts = [
+    ...(winningCardUsed ? [winningCardName] : []),
+    ...(result.gift_card?.applied ? ["Gift Card"] : []),
+    ...(result.affiliate?.applied ? ["Cashback"] : []),
+  ];
   const feedbackKey = [
     result.inputs?.store,
     result.inputs?.category,
@@ -31,6 +48,8 @@ export function ResultsView({ result, onBackHome }) {
     s.final_bill?.exact,
     result.gift_card?.best?.rate_id,
     result.affiliate?.best?.rate_id,
+    cardOptimization.selected_card_id,
+    appliedCardOffer?.offer_id,
   ].filter(Boolean).join("|");
 
   return (
@@ -54,16 +73,24 @@ export function ResultsView({ result, onBackHome }) {
 
         <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.48fr)] lg:items-center">
           <div className="min-w-0">
-            {result.inputs?.card && (
-              <p className="mb-3 flex flex-wrap items-center gap-1.5 text-xs text-ink-muted" data-testid="result-card-used">
+            {(savedCardsChecked > 0 || winningCardUsed) && (
+              <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-ink-muted" data-testid="saved-card-summary">
                 <CreditCard className="h-3.5 w-3.5 text-gold" />
-                Using {result.inputs.card.card_name || result.inputs.card.bank_name} · {result.inputs.card.card_type} · {result.inputs.card.card_network}
-                {(result.affiliate?.best?.card_rule_applied || result.gift_card?.best?.card_rule_applied) && (
-                  <span className="rounded-full bg-savings/15 px-2 py-0.5 text-[10px] font-600 text-savings" data-testid="card-offer-applied">
-                    Card offer applied
+                {savedCardsChecked > 0 && (
+                  <span>{savedCardsChecked} saved card{savedCardsChecked === 1 ? "" : "s"} checked</span>
+                )}
+                {winningCardUsed && (
+                  <span data-testid="result-winning-card">
+                    <span className="mx-1 text-border">·</span> Best savings found using <strong className="text-ink">{winningCardName}</strong>
+                    {winningCardIssuer && <span> · {winningCardIssuer}</span>}
                   </span>
                 )}
-              </p>
+                {appliedCardOffer && (
+                  <span className="rounded-full bg-savings/15 px-2 py-0.5 text-[10px] font-600 text-savings" data-testid="card-offer-applied">
+                    Card offer saves {money(appliedCardOffer.saving)}
+                  </span>
+                )}
+              </div>
             )}
 
             <div className="flex flex-wrap items-end gap-x-3 gap-y-1">
@@ -135,8 +162,15 @@ export function ResultsView({ result, onBackHome }) {
             <p className="text-xs font-700 uppercase tracking-[0.16em] text-gold">Your plan</p>
             <h3 className="mt-1 font-display text-2xl font-700 text-ink">Your Savings Routes</h3>
             <p className="mt-1 text-sm text-ink-muted">Use the routes selected by the YuktiCart calculation.</p>
+            {winningRouteParts.length > 0 && (
+              <p className="mt-2 inline-flex flex-wrap items-center gap-1.5 rounded-full border border-savings/30 bg-savings/5 px-3 py-1.5 text-xs text-savings" data-testid="winning-route-summary">
+                <CheckCircle2 className="h-3.5 w-3.5" /> <strong>Best Route</strong>
+                <span className="text-ink">{winningRouteParts.join(" + ")}</span>
+              </p>
+            )}
           </div>
-          <div className="flex flex-col gap-4 lg:flex-row">
+          <div className="flex flex-col gap-4 lg:flex-row lg:flex-wrap">
+            {appliedCardOffer && <CardOfferRoute cardName={winningCardName} issuer={winningCardIssuer} offer={appliedCardOffer} />}
             <PartnerSection result={result} side="gift_card" />
             <PartnerSection result={result} side="affiliate" />
           </div>
@@ -169,6 +203,29 @@ export function ResultsView({ result, onBackHome }) {
   );
 }
 
+function CardOfferRoute({ cardName, issuer, offer }) {
+  return (
+    <div className="surface flex-1 rounded-2xl p-5 lg:min-w-[280px]" data-testid="card-offer-route">
+      <div className="mb-3 flex items-center gap-2">
+        <CreditCard className="h-4 w-4 text-gold" />
+        <div>
+          <p className="text-[10px] font-700 uppercase tracking-[0.14em] text-ink-muted">Savings route</p>
+          <h5 className="mt-0.5 font-display text-lg font-600 text-ink">Card Offer</h5>
+        </div>
+      </div>
+      <div className="rounded-lg border border-gold/50 bg-gold/5 p-3">
+        <p className="flex items-center gap-1.5 text-sm font-600 text-ink">
+          <CheckCircle2 className="h-4 w-4 shrink-0 text-savings" /> Best Card Offer
+        </p>
+        <p className="mt-1 font-600 text-ink">{cardName || "Saved card"}</p>
+        {issuer && <p className="text-xs text-ink-muted">{issuer}</p>}
+        {offer.offer_name && <p className="mt-1 text-xs text-ink-muted">{offer.offer_name}</p>}
+        <p className="mt-2 savings-text font-700" data-testid="card-route-saving">Saves {money(offer.saving)}</p>
+      </div>
+    </div>
+  );
+}
+
 function PartnerSection({ result, side }) {
   const [open, setOpen] = useState(false);
   const isAff = side === "affiliate";
@@ -177,7 +234,7 @@ function PartnerSection({ result, side }) {
   const options = route?.options || [];
   const eligible = options.filter((o) => o.eligible && Number(o.saving.exact) > 0);
 
-  if (!preferred) return null;
+  if (!preferred || !route?.applied) return null;
 
   // YuktiCart's suggested partner IS the route the engine selected (route.best). We do
   // NOT re-rank on the frontend — we only surface the engine's choice.
@@ -203,7 +260,7 @@ function PartnerSection({ result, side }) {
   const bridgeTo = `/go/${slug}?kind=${side}${storeName ? `&store=${encodeURIComponent(storeName)}` : ""}`;
 
   return (
-    <div className="surface flex-1 rounded-2xl p-5" data-testid={sectionTestId}>
+    <div className="surface flex-1 rounded-2xl p-5 lg:min-w-[280px]" data-testid={sectionTestId}>
       <div className="mb-3 flex items-center gap-2">
         <SectionIcon className="h-4 w-4 text-gold" />
         <div>
@@ -291,14 +348,16 @@ function PartnerSection({ result, side }) {
 function savingsConclusion(result) {
   const s = result.summary;
   if (!(s.extra_saved?.rupees > 0)) return null;
-  const aff = result.affiliate?.best?.platform_name;
-  const gc = result.gift_card?.best?.platform_name;
-  const stk = result.stacking || {};
-  let route;
-  if (stk.double_stack && aff && gc) route = `by stacking ${aff} cashback with a ${gc} gift card`;
-  else if (stk.applied_route === "affiliate" && aff) route = `via ${aff} cashback`;
-  else if (stk.applied_route === "gift_card" && gc) route = `via a ${gc} discounted gift card`;
-  else route = "with this route";
+  const parts = [];
+  const cardName = result.card_optimization?.selected_card_name || result.inputs?.card?.card_name;
+  if (result.card_offer?.applied && cardName) parts.push(`${cardName} card offer`);
+  if (result.gift_card?.applied && result.gift_card?.best?.platform_name) {
+    parts.push(`${result.gift_card.best.platform_name} gift card`);
+  }
+  if (result.affiliate?.applied && result.affiliate?.best?.platform_name) {
+    parts.push(`${result.affiliate.best.platform_name} cashback`);
+  }
+  const route = parts.length ? `using ${parts.join(" + ")}` : "with this route";
   return `You can save ${money(s.extra_saved)} extra with this YuktiCart-approved stack ${route}, bringing your effective bill to ${money(s.final_bill)}.`;
 }
 
