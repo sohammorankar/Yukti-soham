@@ -9,7 +9,8 @@ import { useMeta } from "@/lib/useMeta";
 
 const blankStackability = { affiliate: false, gift_card: false, coupon: false, other_card: false };
 const emptyForm = {
-  card_id: "", store_id: "", offer_name: "", offer_type: "instant_discount",
+  card_id: null, eligibility_scope: "specific_cards", eligible_card_ids: [], excluded_card_ids: [], issuer: "",
+  store_id: "", offer_name: "", offer_type: "instant_discount",
   discount_type: "percentage", discount_value: "", minimum_order_value: "",
   maximum_discount_amount: "", maximum_eligible_amount: "", payment_method: "both",
   customer_type: "both", category_id: "", eligibility_notes: "", valid_from: "",
@@ -49,9 +50,7 @@ export default function CardOffers() {
     load().catch((error) => toast.error(formatApiErrorDetail(error.response?.data?.detail)));
   }, [load]);
 
-  const cardOptions = useMemo(() => cards.map((card) => ({
-    value: card.id, label: `${card.bank_name} · ${card.card_name}`,
-  })), [cards]);
+  const issuerOptions = useMemo(() => Array.from(new Set(cards.map((card) => card.bank_name).filter(Boolean))).sort(), [cards]);
   const storeOptions = useMemo(() => stores.map((store) => ({ value: store.id, label: store.name })), [stores]);
   const categoryOptions = useMemo(() => [
     { value: "", label: "All categories" },
@@ -65,9 +64,18 @@ export default function CardOffers() {
   };
 
   const openEdit = (offer) => {
+    const eligibilityScope = offer.eligibility_scope || "specific_cards";
+    const eligibleCardIds = offer.eligible_card_ids?.length
+      ? offer.eligible_card_ids
+      : (offer.card_id ? [offer.card_id] : []);
     setForm({
       ...emptyForm,
       ...offer,
+      card_id: offer.card_id || null,
+      eligibility_scope: eligibilityScope,
+      eligible_card_ids: eligibleCardIds,
+      excluded_card_ids: offer.excluded_card_ids || [],
+      issuer: offer.issuer || offer.bank_name || "",
       category_id: offer.category_id || "",
       minimum_order_value: offer.minimum_order_value || "",
       maximum_discount_amount: offer.maximum_discount_amount || "",
@@ -90,7 +98,11 @@ export default function CardOffers() {
     setBusy(true);
     try {
       const payload = { ...form };
-      ["category_id", "minimum_order_value", "maximum_discount_amount", "maximum_eligible_amount",
+      payload.card_id = payload.eligibility_scope === "specific_cards"
+        ? (payload.eligible_card_ids[0] || null)
+        : null;
+      if (payload.eligibility_scope !== "issuer") payload.issuer = null;
+      ["card_id", "issuer", "category_id", "minimum_order_value", "maximum_discount_amount", "maximum_eligible_amount",
         "eligibility_notes", "valid_from", "valid_until", "notes", "card_offer_url",
         "promotion_headline", "promotion_description", "promotion_cta_label"].forEach((field) => {
         if (payload[field] === "") payload[field] = null;
@@ -120,6 +132,15 @@ export default function CardOffers() {
   const setStack = (field, value) => setForm((current) => ({
     ...current, stackability: { ...current.stackability, [field]: value },
   }));
+  const toggleCardList = (field, cardId) => setForm((current) => ({
+    ...current,
+    [field]: current[field].includes(cardId)
+      ? current[field].filter((id) => id !== cardId)
+      : [...current[field], cardId],
+  }));
+  const eligibilityReady = form.eligibility_scope === "specific_cards"
+    ? form.eligible_card_ids.length > 0
+    : form.eligibility_scope === "issuer" ? Boolean(form.issuer) : true;
 
   return (
     <div className="mx-auto max-w-6xl">
@@ -138,7 +159,7 @@ export default function CardOffers() {
         <table className="w-full min-w-[940px] text-sm">
           <thead className="bg-surface-2 text-left text-xs uppercase text-ink-muted">
             <tr>
-              <th className="p-3">Card</th><th className="p-3">Store</th><th className="p-3">Offer</th>
+              <th className="p-3">Eligibility</th><th className="p-3">Store</th><th className="p-3">Offer</th>
               <th className="p-3">Discount / Limits</th><th className="p-3">Validity</th>
               <th className="p-3">Priority</th><th className="p-3">Status</th><th className="p-3 text-right">Edit</th>
             </tr>
@@ -146,7 +167,7 @@ export default function CardOffers() {
           <tbody>
             {offers.map((offer) => (
               <tr key={offer.id} className="border-t border-border align-top" data-testid={`card-offer-row-${offer.id}`}>
-                <td className="p-3"><p className="font-600 text-ink">{offer.card_name}</p><p className="text-xs text-ink-muted">{offer.bank_name}</p></td>
+                <td className="p-3"><p className="font-600 text-ink">{offer.eligibility_summary}</p><p className="text-xs text-ink-muted">{offer.excluded_card_ids?.length ? `Excludes ${offer.excluded_card_ids.length} card${offer.excluded_card_ids.length === 1 ? "" : "s"}` : "No exclusions"}</p></td>
                 <td className="p-3"><p className="text-ink">{offer.store_name}</p><p className="text-xs text-ink-muted">{offer.category_name}</p></td>
                 <td className="p-3"><p className="font-600 text-ink">{offer.offer_name}</p><p className="text-xs text-ink-muted">{labelize(offer.offer_type)} · {labelize(offer.payment_method)}</p></td>
                 <td className="p-3"><p className="font-600 text-savings">{discount(offer)}</p><p className="text-xs text-ink-muted">Min {money(offer.minimum_order_value)} · Max discount {money(offer.maximum_discount_amount)}</p></td>
@@ -166,7 +187,33 @@ export default function CardOffers() {
         <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-3xl">
           <DialogHeader><DialogTitle>{editId ? "Edit card offer" : "New card offer"}</DialogTitle></DialogHeader>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <F label="Card" full><Combobox options={cardOptions} value={form.card_id} onChange={(value) => set("card_id", value)} placeholder="Choose catalogue card" testid="card-offer-card" /></F>
+            <F label="Eligibility scope" full>
+              <select value={form.eligibility_scope} onChange={(event) => set("eligibility_scope", event.target.value)}
+                className="offer-input" data-testid="card-offer-eligibility-scope">
+                <option value="specific_cards">Specific Cards</option>
+                <option value="issuer">Issuer / Card Family</option>
+                <option value="all_eligible_cards">All Eligible Cards</option>
+              </select>
+            </F>
+            {form.eligibility_scope === "specific_cards" && (
+              <F label="Eligible cards" full>
+                <CardChecklist cards={cards} selected={form.eligible_card_ids}
+                  onToggle={(cardId) => toggleCardList("eligible_card_ids", cardId)} emptyLabel="No catalogue cards available" />
+              </F>
+            )}
+            {form.eligibility_scope === "issuer" && (
+              <F label="Issuer / card family" full>
+                <select value={form.issuer} onChange={(event) => set("issuer", event.target.value)} className="offer-input" data-testid="card-offer-issuer">
+                  <option value="">Choose catalogue issuer</option>
+                  {issuerOptions.map((issuer) => <option key={issuer} value={issuer}>{issuer}</option>)}
+                </select>
+              </F>
+            )}
+            <F label="Excluded cards (optional)" full>
+              <CardChecklist cards={cards} selected={form.excluded_card_ids}
+                onToggle={(cardId) => toggleCardList("excluded_card_ids", cardId)} emptyLabel="No catalogue cards available" />
+              <p className="mt-1 text-xs text-ink-muted">Exclusion always overrides an inclusion or issuer match.</p>
+            </F>
             <F label="Store" full><Combobox options={storeOptions} value={form.store_id} onChange={(value) => set("store_id", value)} placeholder="Choose store" testid="card-offer-store" /></F>
             <F label="Offer name" full><input value={form.offer_name} onChange={(event) => set("offer_name", event.target.value)} className="offer-input" data-testid="card-offer-name" /></F>
             <F label="Offer type"><select value={form.offer_type} onChange={(event) => set("offer_type", event.target.value)} className="offer-input"><option value="instant_discount">Instant discount</option><option value="cashback">Cashback</option><option value="reward">Reward</option><option value="other">Other</option></select></F>
@@ -202,7 +249,7 @@ export default function CardOffers() {
             <F label="Internal notes" full><textarea value={form.notes} onChange={(event) => set("notes", event.target.value)} rows={3} className="offer-area" /></F>
           </div>
           <DialogFooter>
-            <button type="button" onClick={save} disabled={busy || !form.card_id || !form.store_id || !form.offer_name || form.discount_value === ""}
+            <button type="button" onClick={save} disabled={busy || !eligibilityReady || !form.store_id || !form.offer_name || form.discount_value === ""}
               data-testid="card-offer-save" className="btn-gold rounded-full px-5 py-2 text-sm font-700 disabled:opacity-60">
               {busy ? "Saving…" : "Save offer"}
             </button>
@@ -210,6 +257,21 @@ export default function CardOffers() {
         </DialogContent>
       </Dialog>
       <style>{`.offer-input{height:2.75rem;width:100%;border:1px solid hsl(var(--border));background:hsl(var(--input));border-radius:.5rem;padding:0 .75rem;font-size:.875rem;color:hsl(var(--foreground))}.offer-area{width:100%;border:1px solid hsl(var(--border));background:hsl(var(--input));border-radius:.5rem;padding:.65rem .75rem;font-size:.875rem;color:hsl(var(--foreground))}`}</style>
+    </div>
+  );
+}
+
+function CardChecklist({ cards, selected, onToggle, emptyLabel }) {
+  return (
+    <div className="max-h-44 space-y-1 overflow-y-auto rounded-xl border border-border bg-input p-2">
+      {cards.map((card) => (
+        <label key={card.id} className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-ink hover:bg-muted">
+          <input type="checkbox" checked={selected.includes(card.id)} onChange={() => onToggle(card.id)}
+            className="accent-[var(--gold)]" />
+          <span><span className="font-600">{card.card_name}</span> <span className="text-xs text-ink-muted">· {card.bank_name} · {card.card_type}</span></span>
+        </label>
+      ))}
+      {!cards.length && <p className="p-2 text-sm text-ink-muted">{emptyLabel}</p>}
     </div>
   );
 }
