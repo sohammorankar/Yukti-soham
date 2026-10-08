@@ -26,8 +26,6 @@ export function SavingsEngine({ onResult, initial, initialStores }) {
   const [categoryGroups, setCategoryGroups] = useState([]);
   const [categoryGroup, setCategoryGroup] = useState("");
   const [categoriesForStore, setCategoriesForStore] = useState("");
-  const [myCards, setMyCards] = useState([]);
-  const [cardId, setCardId] = useState(""); // "" = no card selected (optional)
   const [url, setUrl] = useState("");
   const [storeId, setStoreId] = useState("");
   const [category, setCategory] = useState("");
@@ -50,13 +48,6 @@ export function SavingsEngine({ onResult, initial, initialStores }) {
       .then(({ data }) => setStores(data))
       .catch(() => toast.error("Could not load stores"));
   }, [initialStores]);
-
-  // Logged-in shoppers may optionally calculate with one of their saved cards.
-  // Guests never see this and calculate exactly as before.
-  useEffect(() => {
-    if (!isAuthed) { setMyCards([]); setCardId(""); return; }
-    api.get("/cards").then(({ data }) => setMyCards(data)).catch(() => {});
-  }, [isAuthed]);
 
   useEffect(() => {
     if (initial) {
@@ -257,7 +248,6 @@ export function SavingsEngine({ onResult, initial, initialStores }) {
         ...(showCategory && category ? { category } : {}),
         ...(showCustomerType ? { customer_type: customerType } : {}),
         ...(mrp ? { mrp: Number(mrp) } : {}),
-        ...(cardId ? { card_id: cardId } : {}),
       });
       setLastResult(data);
       onResult(data);
@@ -344,39 +334,15 @@ export function SavingsEngine({ onResult, initial, initialStores }) {
           )}
         </div>
 
-        {/* Optional payment card — logged-in shoppers only; never required */}
-        {isAuthed && (
-          <div className="mt-4">
-            <label className="mb-1.5 flex items-center gap-1.5 text-xs font-600 uppercase tracking-wide text-ink-muted">
-              <CreditCard className="h-3.5 w-3.5" /> Payment Card
-              <span className="font-400 normal-case tracking-normal">(optional)</span>
-            </label>
-            {myCards.length > 0 ? (
-              <select
-                value={cardId}
-                onChange={(e) => setCardId(e.target.value)}
-                data-testid="select-card"
-                aria-label="Select payment card (optional)"
-                className="focus-ring h-11 w-full rounded-md border border-border bg-input px-3 text-sm text-foreground"
-              >
-                <option value="">No card selected</option>
-                {myCards.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.card_name ? `${c.card_name} • ${c.card_network}` : `${c.bank_name} • ${c.card_type} • ${c.card_network}`}
-                  </option>
-                ))}
-              </select>
-            ) : (
-              <p className="rounded-md border border-dashed border-border px-3 py-2.5 text-xs text-ink-muted" data-testid="no-saved-card">
-                No saved card —{" "}
-                <Link to="/account/cards" className="text-gold hover:underline" data-testid="add-card-link">
-                  add one in My Cards
-                </Link>{" "}
-                to check card-specific eligibility.
-              </p>
-            )}
-          </div>
-        )}
+        <div className="mt-4 flex items-center gap-2 rounded-md border border-dashed border-border px-3 py-2.5 text-xs text-ink-muted" data-testid="automatic-card-check">
+          <CreditCard className="h-4 w-4 shrink-0 text-gold" />
+          <span>YuktiCart automatically checks your saved cards.</span>
+          {isAuthed && (
+            <Link to="/account/cards" className="ml-auto shrink-0 text-gold hover:underline" data-testid="manage-cards-link">
+              Manage My Cards
+            </Link>
+          )}
+        </div>
 
         {/* Amazon / Flipkart notice */}
         {isAmazonFlipkart && (
