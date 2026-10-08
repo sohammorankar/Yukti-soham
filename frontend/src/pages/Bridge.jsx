@@ -5,13 +5,13 @@ import { Sparkles, AlertTriangle, ArrowLeft, ShieldCheck } from "lucide-react";
 import { api } from "@/lib/api";
 import { useMeta } from "@/lib/useMeta";
 
-// YuktiMagic bridge: a Yukti-controlled hop between the results page and the
+// YuktiMagic bridge: a YuktiCart-controlled hop between the results page and the
 // trusted external partner. The external URL is ALWAYS resolved by the backend
 // (GET /api/redirect/:slug) — never constructed on the client — so there is no
 // open-redirect surface. A short (~1.4s) branded transition plays, then we hand
 // the user off to the resolved destination exactly once.
 export default function Bridge() {
-  useMeta("YuktiMagic · Preparing your savings route", "Securely routing you to your Yukti-suggested partner.");
+  useMeta("YuktiMagic · Preparing your savings route", "Securely routing you to your YuktiCart-suggested partner.");
   const { partner } = useParams();
   const [params] = useSearchParams();
   const store = params.get("store");
@@ -96,7 +96,7 @@ export default function Bridge() {
             </p>
 
             <p className="mt-6 inline-flex items-center gap-1.5 text-[11px] text-ink-muted">
-              <ShieldCheck className="h-3.5 w-3.5 text-gold" /> Secure Yukti-verified redirect
+              <ShieldCheck className="h-3.5 w-3.5 text-gold" /> Secure YuktiCart-verified redirect
             </p>
           </>
         ) : (
