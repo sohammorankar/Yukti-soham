@@ -2,7 +2,7 @@ import React from "react";
 import { NavLink, Outlet, useNavigate, Navigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import {
-  LayoutDashboard, Boxes, Store, Tags, Grid3x3, ScrollText, LogOut, Sparkles, Table2, CreditCard, Link2, MessageSquareText,
+  LayoutDashboard, Boxes, Store, Tags, Grid3x3, ScrollText, LogOut, Sparkles, Table2, CreditCard, Link2, MessageSquareText, BadgePercent,
 } from "lucide-react";
 
 const ITEMS = [
@@ -16,6 +16,7 @@ const ITEMS = [
   { to: "/admin/categories", label: "Categories & Keywords", icon: Tags },
   { to: "/admin/affiliate-destinations", label: "Partner Destinations", icon: Link2 },
   { to: "/admin/cards", label: "Card Catalogue", icon: CreditCard },
+  { to: "/admin/card-offers", label: "Card Offers", icon: BadgePercent },
   { to: "/admin/user-feedback", label: "User Feedback", icon: MessageSquareText },
   { to: "/admin/audit", label: "Audit Log", icon: ScrollText },
 ];
