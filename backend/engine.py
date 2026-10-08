@@ -630,6 +630,7 @@ def calculate_stack(store, product_category, customer_type, mrp, price,
             "category": product_category,
             "customer_type": customer_type,
             "card": ({
+                "id": card.get("id"),
                 "bank_name": card.get("bank_name"),
                 "card_type": card.get("card_type"),
                 "card_network": card.get("card_network"),

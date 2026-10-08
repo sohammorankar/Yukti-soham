@@ -911,7 +911,8 @@ async def refresh_token(request: Request, response: Response):
 # expiry, PINs or any credentials are accepted or stored. Every document is
 # owned by exactly one shopper (user_id) and all queries are owner-scoped, so
 # no shopper can read, modify or delete another shopper's cards. These
-# profiles are NOT read by /api/calculate and have no effect on savings math.
+# profiles are read by /api/calculate for authenticated automatic card optimization,
+# while guests continue through the unchanged baseline path.
 # --------------------------------------------------------------------------
 
 CARD_PROJECTION = {"_id": 0, "id": 1, "bank_name": 1, "card_type": 1, "card_network": 1,
@@ -1511,26 +1512,86 @@ async def calculate(body: CalcBody, request: Request):
         aff, gc = await _load_rates_for(store["id"])
         fallback = False
 
-    # Optional payment card: must be one of the caller's OWN saved profiles.
-    # Guests and no-card requests calculate exactly as before (card=None).
-    card = None
-    card_offers = []
+    # New consumer requests automatically evaluate every catalogue-backed saved
+    # card. Legacy callers may still provide card_id to evaluate one owned card.
+    caller = await get_optional_user(request)
+    saved_cards = []
+    mode = "guest_baseline"
     if body.card_id:
-        caller = await get_optional_user(request)
         if not caller:
             raise HTTPException(status_code=401, detail="Log in to use a saved card")
         owned = await db.card_profiles.find_one(
-            {"id": body.card_id, "user_id": caller["id"]},
-            {"_id": 0, "bank_name": 1, "card_type": 1, "card_network": 1,
-             "card_name": 1, "card_catalog_id": 1})
+            {"id": body.card_id, "user_id": caller["id"]}, CARD_PROJECTION)
         if not owned:
             raise HTTPException(status_code=404, detail="Card not found")
-        card = owned
-        card_offers = await _load_card_offers(store.get("id"))
+        saved_cards = [owned]
+        mode = "legacy_explicit"
+    elif caller:
+        saved_cards = await db.card_profiles.find(
+            {"user_id": caller["id"]}, CARD_PROJECTION).sort("created_at", 1).to_list(200)
+        mode = "automatic"
 
-    result = calculate_stack(store, body.category, body.customer_type, body.mrp,
-                             body.price, aff, gc, rate_version=RATE_VERSION, card=card,
-                             card_offers=card_offers)
+    card_offers = await _load_card_offers(store.get("id")) if saved_cards else []
+
+    def run_calculation(card=None):
+        return calculate_stack(
+            store, body.category, body.customer_type, body.mrp, body.price, aff, gc,
+            rate_version=RATE_VERSION, card=card,
+            card_offers=card_offers if card else [])
+
+    baseline = run_calculation()
+    selected_card = None
+    if mode == "legacy_explicit":
+        selected_card = saved_cards[0]
+        result = run_calculation(selected_card)
+    else:
+        result = baseline
+        winning_saving = D(baseline["summary"]["extra_saved"]["exact"])
+        winning_tiebreak = None
+        scope_rank = {"legacy_specific_card": 3, "specific_cards": 3, "issuer": 2,
+                      "all_eligible_cards": 1}
+        for candidate_card in saved_cards:
+            candidate = run_calculation(candidate_card)
+            candidate_saving = D(candidate["summary"]["extra_saved"]["exact"])
+            applied_offer = (candidate.get("card_offer") or {}).get("applied_offer") or {}
+            candidate_tiebreak = (
+                int(applied_offer.get("priority") or 0),
+                scope_rank.get(applied_offer.get("eligibility_scope"), 0),
+                str(applied_offer.get("valid_from") or ""),
+                str(candidate_card.get("id") or ""),
+            )
+            if (candidate_saving > winning_saving
+                    or (selected_card and candidate_saving == winning_saving
+                        and candidate_tiebreak > winning_tiebreak)):
+                result = candidate
+                selected_card = candidate_card
+                winning_saving = candidate_saving
+                winning_tiebreak = candidate_tiebreak
+
+    applied_offer = (result.get("card_offer") or {}).get("applied_offer") or {}
+    stack_components = result.get("stacking", {}).get("applied_components")
+    if stack_components is None:
+        stack_components = [side for side in ("affiliate", "gift_card")
+                            if result.get(side, {}).get("applied")]
+    result["card_optimization"] = {
+        "mode": mode,
+        "saved_cards_checked": len(saved_cards),
+        "saved_cards": [{
+            "id": card.get("id"),
+            "name": card.get("card_name"),
+            "issuer": card.get("bank_name"),
+        } for card in saved_cards],
+        "baseline_savings": baseline["summary"]["extra_saved"],
+        "selected_card_id": selected_card.get("id") if selected_card else None,
+        "selected_card_name": selected_card.get("card_name") if selected_card else None,
+        "selected_card_issuer": selected_card.get("bank_name") if selected_card else None,
+        "card_offer_id": applied_offer.get("offer_id"),
+        "card_offer_name": applied_offer.get("offer_name"),
+        "card_savings": applied_offer.get("saving") or money_out(0),
+        "total_savings": result["summary"]["extra_saved"],
+        "stack_components": stack_components,
+        "route_type": result.get("stacking", {}).get("applied_route"),
+    }
     result["fallback"] = fallback
 
     # Enrich routes with the partner's website (editable in the console) so the UI
