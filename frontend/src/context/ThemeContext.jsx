@@ -32,7 +32,9 @@ export function ThemeProvider({ children }) {
   // Default theme: the existing SECOND theme ("obsidian" / Cyber Obsidian).
   // Returning visitors keep their previously stored preference (existing
   // localStorage persistence reused unchanged).
-  const [theme, setThemeState] = useState(() => localStorage.getItem("yc_theme") || "obsidian");
+  
+  const [theme, setThemeState] = useState(() => localStorage.getItem("yc_theme") || "gold");
+
   // Startup never auto-shows the theme selector: users enter the app directly
   // after the loading animation. The palette button (reopenSelector) still
   // opens the selector on demand, and confirmChoice still persists choices.
