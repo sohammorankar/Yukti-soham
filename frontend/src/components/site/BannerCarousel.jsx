@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { ChevronLeft, ChevronRight, Sparkles } from "lucide-react";
 
 const AUTOPLAY_MS = 5500;
@@ -28,7 +28,10 @@ export function BannerCarousel({ banners = [] }) {
   const reducedMotion = usePrefersReducedMotion();
   const [index, setIndex] = useState(0);
   const [paused, setPaused] = useState(false);
+  const [imageRatios, setImageRatios] = useState({});
   const count = banners.length;
+  const activeBanner = banners[index] || banners[0];
+  const activeRatio = activeBanner ? imageRatios[activeBanner.id] : null;
 
   const goTo = useCallback((next) => {
     if (count === 0) return;
@@ -46,6 +49,26 @@ export function BannerCarousel({ banners = [] }) {
   }, [count, paused, reducedMotion]);
 
   useEffect(() => { if (index >= count) setIndex(0); }, [count, index]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loaders = banners.map((banner) => {
+      const image = new Image();
+      image.onload = () => {
+        if (cancelled || !image.naturalWidth || !image.naturalHeight) return;
+        setImageRatios((current) => ({
+          ...current,
+          [banner.id]: `${image.naturalWidth} / ${image.naturalHeight}`,
+        }));
+      };
+      image.src = banner.image_url;
+      return image;
+    });
+    return () => {
+      cancelled = true;
+      loaders.forEach((image) => { image.onload = null; });
+    };
+  }, [banners]);
 
   const pause = () => setPaused(true);
   const resume = () => setPaused(false);
@@ -75,7 +98,10 @@ export function BannerCarousel({ banners = [] }) {
       onBlur={resume}
     >
       <div
-        className="relative overflow-hidden rounded-2xl border border-border"
+        className={`relative overflow-hidden rounded-md border border-gold/40 bg-black/20 ${
+          activeRatio ? "" : "aspect-[16/9] sm:aspect-[21/6]"
+        }`}
+        style={activeRatio ? { aspectRatio: activeRatio } : undefined}
         role="region"
         aria-roledescription="carousel"
         aria-label="Promotions"
@@ -84,13 +110,7 @@ export function BannerCarousel({ banners = [] }) {
           else if (event.key === "ArrowRight") { event.preventDefault(); goNext(); }
         }}
       >
-        <div
-          className="flex"
-          style={{
-            transform: `translateX(-${index * 100}%)`,
-            transition: reducedMotion ? "none" : "transform 500ms ease",
-          }}
-        >
+        <div className="relative h-full">
           {banners.map((banner, slideIndex) => {
             const isCurrent = slideIndex === index;
             const hasLink = Boolean(banner.destination_url);
@@ -101,7 +121,9 @@ export function BannerCarousel({ banners = [] }) {
             return (
               <div
                 key={banner.id}
-                className="aspect-[16/9] w-full shrink-0 grow-0 basis-full sm:aspect-[21/6]"
+                className={`absolute inset-0 h-full w-full transition-opacity duration-500 ${
+                  isCurrent ? "opacity-100" : "pointer-events-none opacity-0"
+                } ${reducedMotion ? "!transition-none" : ""}`}
                 role="group"
                 aria-roledescription="slide"
                 aria-hidden={!isCurrent}
@@ -115,9 +137,10 @@ export function BannerCarousel({ banners = [] }) {
                   <img
                     src={banner.image_url}
                     alt={banner.alt_text}
-                    className="h-full w-full object-cover"
+                    className="block h-full w-full object-contain"
                     loading={slideIndex === 0 ? "eager" : "lazy"}
                     draggable={false}
+                    data-testid={`banner-slide-${banner.id}-image`}
                   />
                   {banner.title && (
                     <span
