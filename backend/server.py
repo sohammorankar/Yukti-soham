@@ -1925,7 +1925,6 @@ async def category_correction(body: CorrectionBody):
     return {"ok": True}
 
 
-EMAIL_BASE_URL = "https://integrations.emergentagent.com"
 _EMAIL_SHORTENERS = ("bit.ly", "tinyurl.com", "t.co", "is.gd", "cutt.ly", "goo.gl", "rebrand.ly")
 _EMAIL_CRED_ASK = (
     "reply with your password", "reply with the code", "send your password", "cvv",
@@ -2002,17 +2001,20 @@ def _assert_safe_email(subject, html):
 
 def _feedback_email_config():
     config = {
-        "key": os.environ.get("EMERGENT_EMAIL_KEY"),
-        "from_name": os.environ.get("EMAIL_FROM_NAME"),
-        "recipient": os.environ.get("CONTACT_RECIPIENT_EMAIL"),
-        "reply_to": os.environ.get("EMAIL_REPLY_TO"),
+        "key": os.environ.get("RESEND_API_KEY"),
+        "from_name": (os.environ.get("EMAIL_FROM_NAME") or "YuktiCart").strip(),
+        "from_address": (os.environ.get("EMAIL_FROM_ADDRESS") or "").strip(),
+        "recipient": (os.environ.get("CONTACT_RECIPIENT_EMAIL") or "").strip(),
     }
-    if not all(config[field] for field in ("key", "from_name", "recipient")):
+    if not all(config[field] for field in ("key", "from_name", "from_address", "recipient")):
         raise HTTPException(status_code=503, detail="Support email delivery is not configured")
-    if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", config["recipient"]):
+    email_pattern = r"[^\s@]+@[^\s@]+\.[^\s@]+"
+    if not re.fullmatch(email_pattern, config["recipient"]):
         raise HTTPException(status_code=503, detail="Support email recipient is invalid")
-    if config["reply_to"] and not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", config["reply_to"]):
-        raise HTTPException(status_code=503, detail="Support email Reply-To is invalid")
+    if not re.fullmatch(email_pattern, config["from_address"]):
+        raise HTTPException(status_code=503, detail="Support email sender is invalid")
+    if any(ch in config["from_name"] for ch in "\r\n"):
+        raise HTTPException(status_code=503, detail="Support email sender is invalid")
     return config
 
 
@@ -2053,26 +2055,46 @@ async def _send_feedback_notification(feedback_doc, config):
         _assert_safe_email(subject, html)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="This message cannot be delivered safely") from exc
-    payload = {"to": [config["recipient"]], "subject": subject, "html": html,
-               "from_name": config["from_name"]}
-    # Reply-To is the customer's own validated email (EmailStr) when given, so the
-    # owner can hit "reply" in their inbox and land directly on the customer —
-    # never a caller-supplied free-text address, and never used as the sender.
-    reply_to = visitor_email or config.get("reply_to")
-    if reply_to:
-        payload["contact_email"] = reply_to
+
+    payload = {
+        "from": f'{config["from_name"]} <{config["from_address"]}>',
+        "to": [config["recipient"]],
+        "subject": subject,
+        "html": html,
+    }
+    # Customer addresses are validated by FeedbackBody (EmailStr); they are used
+    # only as Reply-To, never as the sender. The sender is our verified domain.
+    if visitor_email:
+        payload["reply_to"] = visitor_email
 
     def deliver():
         response = requests.post(
-            f"{EMAIL_BASE_URL}/api/v1/email/send",
-            headers={"X-Email-Key": config["key"]}, json=payload, timeout=30)
-        response.raise_for_status()
-        return response.json().get("id")
+            "https://api.resend.com/emails",
+            headers={
+                "Authorization": f'Bearer {config["key"]}',
+                "Content-Type": "application/json",
+            },
+            json=payload,
+            timeout=20,
+        )
+        if not response.ok:
+            # Do not log response bodies or request headers; they may contain
+            # provider details and must never expose credentials.
+            logger.error("Resend email delivery failed with HTTP status %s", response.status_code)
+            response.raise_for_status()
+        data = response.json()
+        email_id = data.get("id") if isinstance(data, dict) else None
+        if not email_id:
+            raise ValueError("Resend response did not include an email ID")
+        return email_id
 
     try:
         return await asyncio.to_thread(deliver)
-    except (requests.RequestException, ValueError) as exc:
-        logger.error("Feedback email delivery failed: %s", exc)
+    except requests.RequestException as exc:
+        logger.error("Resend email delivery failed (%s)", type(exc).__name__)
+        raise HTTPException(status_code=502, detail="Unable to deliver your message right now") from exc
+    except ValueError as exc:
+        logger.error("Resend returned an invalid email response")
         raise HTTPException(status_code=502, detail="Unable to deliver your message right now") from exc
 
 
