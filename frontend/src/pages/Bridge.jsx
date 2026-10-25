@@ -4,6 +4,7 @@ import { motion } from "framer-motion";
 import { Sparkles, AlertTriangle, ArrowLeft, ShieldCheck } from "lucide-react";
 import { api } from "@/lib/api";
 import { useMeta } from "@/lib/useMeta";
+import { trackEvent } from "@/lib/analytics";
 
 // YuktiMagic bridge: a YuktiCart-controlled hop between the results page and the
 // trusted external partner. The external URL is ALWAYS resolved by the backend
@@ -40,8 +41,16 @@ export default function Bridge() {
         setTimeout(() => {
           if (cancelled || doneRef.current) return;
           doneRef.current = true;
+          // Fires exactly once (guarded by doneRef) at the point the user is
+          // actually sent to the external partner — never claims a purchase or
+          // cashback outcome, only that the redirect happened. A short flat
+          // delay gives the browser time to actually dispatch the event's
+          // network request before we navigate away in the same tick.
+          trackEvent("outbound_redirect_clicked", {
+            partner: data.partner || partner, store: store || undefined,
+          });
           // replace() so the back button returns to results, not to this bridge.
-          window.location.replace(data.url);
+          setTimeout(() => window.location.replace(data.url), 150);
         }, wait);
       } catch (e) {
         if (cancelled) return;
