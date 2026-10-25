@@ -1,4 +1,4 @@
-import React, { useContext, useEffect, useState } from "react";
+import React, { useCallback, useContext, useEffect, useState } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Sparkles, Store, Tags, Users, ArrowRight, Flame, Zap } from "lucide-react";
@@ -7,10 +7,12 @@ import { ResultsView } from "@/components/site/ResultsView";
 import { YuktiMagic } from "@/components/site/YuktiMagic";
 import { SectionHead } from "@/components/site/TrendingDeals";
 import { HomepagePromotions } from "@/components/site/HomepagePromotions";
+import { BannerCarousel } from "@/components/site/BannerCarousel";
 import { StoreSavingsCard } from "@/components/site/StoreSavingsCard";
 import { MandirContext } from "@/components/site/SiteLayout";
 import { useHomeBootstrap } from "@/components/site/HomeStartupGate";
 import { api } from "@/lib/api";
+import { useMeta } from "@/lib/useMeta";
 
 const AssetFallback = ({ label, className = "" }) => (
   <div className={`grid place-items-center rounded-lg border border-gold/20 bg-black/20 text-lg font-display font-700 text-gold ${className}`}>
@@ -19,16 +21,22 @@ const AssetFallback = ({ label, className = "" }) => (
 );
 
 export default function Home() {
+  useMeta(
+    "YuktiCart — Stack cashback, gift cards & discounts for the lowest bill",
+    "YuktiCart helps you compare eligible cashback, gift-card discounts and card offers across stores, so you always know the lowest effective price before you buy.",
+    "/"
+  );
   const bootstrap = useHomeBootstrap();
   const [result, setResult] = useState(null);
   const [magic, setMagic] = useState(false);
   const [engineResetKey, setEngineResetKey] = useState(0);
-  const handleResult = (data) => { setResult(data); setMagic(true); };
+  const handleResult = useCallback((data) => { setResult(data); setMagic(Boolean(data)); }, []);
   const [initial, setInitial] = useState(null);
   const [stores, setStores] = useState(() => bootstrap?.stores || []);
   const [homepageStores, setHomepageStores] = useState(() => bootstrap?.homepageStores || []);
   const [categories, setCategories] = useState(() => bootstrap?.categories || []);
   const [promotions, setPromotions] = useState(() => bootstrap?.promotions || []);
+  const [banners, setBanners] = useState(() => bootstrap?.banners || []);
   const openMandir = useContext(MandirContext);
   const [searchParams] = useSearchParams();
   const location = useLocation();
@@ -61,7 +69,6 @@ export default function Home() {
   }, [location.hash]);
 
   useEffect(() => {
-    document.title = "YuktiCart — Stack cashback, gift cards & discounts for the lowest bill";
     if (bootstrap) return;
     // On later SPA visits the startup gate does not run; these remain independent
     // parallel reads so one optional section failing does not hide the others.
@@ -69,17 +76,19 @@ export default function Home() {
     api.get("/public/stores?homepage=true&limit=5").then(({ data }) => setHomepageStores(data)).catch(() => {});
     api.get("/public/homepage/categories").then(({ data }) => setCategories(data)).catch(() => {});
     api.get("/public/homepage/promotions").then(({ data }) => setPromotions(data)).catch(() => {});
+    api.get("/public/banners").then(({ data }) => setBanners(data)).catch(() => {});
   }, [bootstrap]);
 
   return (
     <div className="space-y-24 pb-12">
       {magic && <YuktiMagic onDone={() => setMagic(false)} />}
+      <BannerCarousel banners={banners} />
       {/* Hero + engine */}
       <section className="relative overflow-hidden border-b border-border pb-14 sm:pb-16">
         <div className="grid-texture pointer-events-none absolute inset-0 opacity-30" />
         <div className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-gold/35 to-transparent" />
-        <div className="mx-auto grid max-w-7xl gap-12 px-4 pt-12 sm:px-6 lg:grid-cols-[0.9fr_1.1fr] lg:items-center lg:pt-20">
-          <div className="flex flex-col justify-center">
+        <div className="mx-auto grid max-w-7xl gap-12 px-4 pt-12 sm:px-6 lg:pt-20">
+          <div className="flex max-w-3xl flex-col justify-center">
             <motion.span
               initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
               className="inline-flex w-fit items-center gap-1.5 rounded-full border border-gold/40 px-3 py-1 text-xs text-gold">
