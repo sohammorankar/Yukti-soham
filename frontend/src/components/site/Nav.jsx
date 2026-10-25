@@ -46,7 +46,7 @@ export function Nav({ onOpenGuide }) {
 
   return (
     <header className="sticky top-0 z-40 glass" data-testid="site-nav">
-      <div className="mx-auto flex h-16 max-w-7xl items-center gap-2 px-3 sm:gap-4 sm:px-6">
+      <div className="mx-auto flex h-[4.5rem] max-w-7xl items-center gap-3 px-3 sm:gap-4 sm:px-6">
         <Logo testId="header-logo" />
 
         {/* Long product / URL search area — routes to the homepage Savings Engine */}
@@ -60,7 +60,7 @@ export function Nav({ onOpenGuide }) {
             data-testid="nav-search-input"
             aria-label="Paste a product link"
             placeholder="Paste a product link to find your lowest bill…"
-            className="focus-ring h-10 w-full rounded-full border border-border bg-white pl-9 pr-3 text-sm text-black placeholder:text-slate-500"
+            className="focus-ring h-11 w-full rounded-full border border-border bg-white pl-9 pr-3 text-sm text-black placeholder:text-slate-500"
           />
         </form>
 
