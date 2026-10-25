@@ -1,0 +1,10 @@
+User-agent: *
+Allow: /
+Disallow: /admin
+Disallow: /admin/
+Disallow: /login
+Disallow: /signup
+Disallow: /account/
+Disallow: /go/
+
+Sitemap: https://yukticart.com/sitemap.xml
