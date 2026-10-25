@@ -9,6 +9,8 @@ import { money, moneyExact } from "@/lib/format";
 import { EmotionalPanel } from "@/components/site/EmotionalPanel";
 import { ReceiptStamp } from "@/components/site/ReceiptStamp";
 import { ResultFeedback } from "@/components/site/ResultFeedback";
+import { CashbackEstimate } from "@/components/site/CashbackEstimate";
+import { trackEvent } from "@/lib/analytics";
 
 const STATUS_STYLE = {
   great_stack: { color: "text-savings", icon: CheckCircle2 },
@@ -23,6 +25,9 @@ export function ResultsView({ result, onBackHome }) {
   const s = result.summary;
   const st = STATUS_STYLE[s.status] || STATUS_STYLE.no_saving;
   const StatusIcon = st.icon;
+  const hasGiftCardSection = s.extra_saved.rupees > 0 && Boolean(result.gift_card?.applied && result.gift_card?.best);
+  const hasCashbackSection = s.extra_saved.rupees > 0 && Boolean(result.affiliate?.applied && result.affiliate?.best);
+  const jumpToSection = (id) => () => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
   const cardOptimization = result.card_optimization || {};
   const savedCardsChecked = cardOptimization.saved_cards_checked || 0;
   const winningCardName = cardOptimization.selected_card_name || result.inputs?.card?.card_name || result.card_offer?.card_name;
@@ -101,11 +106,13 @@ export function ResultsView({ result, onBackHome }) {
               <span className="font-display text-5xl font-700 savings-text sm:text-6xl" data-testid="result-extra-saved">
                 {money(s.extra_saved)}
               </span>
-              <span className="pb-1 text-sm font-700 uppercase tracking-[0.16em] text-ink-muted">you save</span>
+              <span className="pb-1 text-sm font-700 uppercase tracking-[0.16em] text-ink-muted" data-testid="result-savings-label">potential savings</span>
             </div>
 
+            <CashbackEstimate result={result} />
+
             <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3">
-              <Stat icon={Receipt} label="Effective price" value={money(s.final_bill)} testid="result-final-bill" exact={moneyExact(s.final_bill)} />
+              <Stat icon={Receipt} label="Estimated effective price" value={money(s.final_bill)} testid="result-final-bill" exact={moneyExact(s.final_bill)} />
               {s.mrp_provided && (
                 <Stat icon={TrendingUp} label="Total off MRP" value={money(s.total_saving)} testid="result-total-saving" exact={moneyExact(s.total_saving)} />
               )}
@@ -129,6 +136,32 @@ export function ResultsView({ result, onBackHome }) {
         </div>
       </section>
 
+      {/* Quick jump to the actual gift-card / cashback sections further down this page */}
+      {(hasGiftCardSection || hasCashbackSection) && (
+        <div className="flex flex-wrap gap-3" data-testid="results-quick-nav">
+          {hasGiftCardSection && (
+            <button
+              type="button"
+              onClick={jumpToSection("giftcard-section")}
+              data-testid="jump-to-giftcard"
+              className="focus-ring inline-flex items-center gap-1.5 rounded-full border border-border px-4 py-2 text-sm font-600 text-ink-muted transition-colors hover:border-gold/40 hover:text-gold"
+            >
+              <Gift className="h-4 w-4 text-gold" /> View gift-card offers
+            </button>
+          )}
+          {hasCashbackSection && (
+            <button
+              type="button"
+              onClick={jumpToSection("cashback-section")}
+              data-testid="jump-to-cashback"
+              className="focus-ring inline-flex items-center gap-1.5 rounded-full border border-border px-4 py-2 text-sm font-600 text-ink-muted transition-colors hover:border-gold/40 hover:text-gold"
+            >
+              <Percent className="h-4 w-4 text-gold" /> View cashback offers
+            </button>
+          )}
+        </div>
+      )}
+
       {/* 2–4 — Understand and execute the saving */}
       {s.extra_saved.rupees > 0 && (
         <div className="grid gap-5 lg:grid-cols-[minmax(0,1.1fr)_minmax(360px,0.9fr)] lg:items-start">
@@ -138,7 +171,7 @@ export function ResultsView({ result, onBackHome }) {
               How to use your savings
             </h3>
             <p className="mt-2 text-sm leading-relaxed text-ink-muted">
-              Follow this order to preserve the validated savings route and partner tracking.
+              Follow this order for the suggested savings route and partner tracking. Verify partner terms before paying.
             </p>
             {executionSteps.length > 0 && (
               <ol className="mt-6 space-y-4" data-testid="checkout-steps">
@@ -277,6 +310,7 @@ function PartnerSection({ result, side }) {
   const label = isAff ? "Cashback" : "Gift Card";
   const SectionIcon = isAff ? Percent : Gift;
   const verb = isAff ? "Continue with" : "Buy gift card via";
+  const sectionId = isAff ? "cashback-section" : "giftcard-section";
   const sectionTestId = isAff ? "affiliate-partners" : "giftcard-partners";
   const ctaTestId = isAff ? "cta-continue-affiliate" : "cta-continue-giftcard";
   const toggleTestId = isAff ? "toggle-partners" : "toggle-giftcard-partners";
@@ -292,7 +326,7 @@ function PartnerSection({ result, side }) {
   const bridgeTo = `/go/${slug}?kind=${side}${storeName ? `&store=${encodeURIComponent(storeName)}` : ""}`;
 
   return (
-    <div className="surface flex-1 rounded-2xl p-5 lg:min-w-[280px]" data-testid={sectionTestId}>
+    <div id={sectionId} className="surface flex-1 scroll-mt-20 rounded-2xl p-5 lg:min-w-[280px]" data-testid={sectionTestId}>
       <div className="mb-3 flex items-center gap-2">
         <SectionIcon className="h-4 w-4 text-gold" />
         <div>
@@ -308,12 +342,17 @@ function PartnerSection({ result, side }) {
             <Star className="h-4 w-4 shrink-0 fill-gold text-gold" />
             YuktiCart recommends: <span className="gold-text">{preferred.platform_name}</span>
           </p>
-          <p className="mt-0.5 text-xs text-ink-muted">
-            {fmtRate(preferred)} · saves {money(preferred.saving)}
+          <p className="mt-0.5 text-xs text-ink-muted" data-testid={`${side}-estimated-saving`}>
+            {fmtRate(preferred)} · estimated saving {moneyExact(preferred.saving)}
           </p>
         </div>
         {preferredUrl ? (
           <Link to={bridgeTo} target="_blank" rel="noopener noreferrer" data-testid={ctaTestId}
+            onClick={() => trackEvent("offer_selected", {
+              offer_type: isAff ? "cashback" : "gift_card",
+              partner: preferred.platform_name,
+              store: storeName,
+            })}
             className="btn-gold focus-ring inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-sm font-700">
             {verb} {preferred.platform_name} <ArrowUpRight className="h-4 w-4" />
           </Link>
@@ -323,6 +362,14 @@ function PartnerSection({ result, side }) {
             <Info className="h-3.5 w-3.5" /> Redirect link not configured — follow checkout steps
           </span>
         )}
+      </div>
+
+      <div className="mt-2 space-y-1 text-xs text-ink-muted" data-testid={`${side}-conditions`}>
+        {preferred.minimum_order_value != null && <p>Minimum order: {moneyExact(preferred.minimum_order_value)}</p>}
+        {preferred.maximum_eligible_amount != null && <p>Eligible-spend limit: {moneyExact(preferred.maximum_eligible_amount)}</p>}
+        {(preferred.maximum_cashback_amount ?? preferred.cashback_cap_amount) != null && <p>Cashback cap: {moneyExact(preferred.maximum_cashback_amount ?? preferred.cashback_cap_amount)}</p>}
+        {preferred.valid_until && <p>Valid until: {preferred.valid_until}</p>}
+        {preferred.notes && <p className="break-words">{preferred.notes}</p>}
       </div>
 
       {/* Affiliate side keeps the existing "Open store" convenience link */}
@@ -447,7 +494,7 @@ function savingsConclusion(result) {
     parts.push(`${result.affiliate.best.platform_name} cashback`);
   }
   const route = parts.length ? `using ${parts.join(" + ")}` : "with this route";
-  return `You can save ${money(s.extra_saved)} extra with this YuktiCart-approved stack ${route}, bringing your effective bill to ${money(s.final_bill)}.`;
+  return `Estimated extra savings of ${money(s.extra_saved)} ${route}, with an estimated effective bill of ${money(s.final_bill)}. Subject to eligibility and partner terms.`;
 }
 
 function Stat({ icon: Icon, label, value, exact, testid }) {
