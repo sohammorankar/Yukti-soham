@@ -503,16 +503,41 @@ class CalcBody(BaseModel):
     store_id: Optional[str] = None
     store_name: Optional[str] = None
     category: Optional[str] = None
+    product_url: Optional[str] = Field(default=None, max_length=2048)
     customer_type: Literal["new", "existing", "both"] = "existing"
     mrp: Optional[float] = None
     price: float
     # Optional: one of the authenticated shopper's own saved card profiles.
     card_id: Optional[str] = None
 
+    @field_validator("category")
+    @classmethod
+    def optional_category(cls, value):
+        value = (value or "").strip()
+        return value if value and value.lower() != "all" else None
+
+    @field_validator("product_url")
+    @classmethod
+    def safe_product_url(cls, value):
+        if not value or not value.strip():
+            return None
+        value = value.strip()
+        if "://" not in value:
+            value = "https://" + value
+        try:
+            parsed = urlsplit(value)
+            if (parsed.scheme not in ("https", "http") or not parsed.hostname
+                    or parsed.username or parsed.password or re.search(r"[\s\\]", value)):
+                raise ValueError()
+            _ = parsed.port
+        except ValueError:
+            raise ValueError("Product URL must be a valid HTTP or HTTPS link")
+        return value
+
     @field_validator("mrp", "price")
     @classmethod
     def non_negative(cls, v):
-        if v is not None and v < 0:
+        if v is not None and (not D(v).is_finite() or v < 0):
             raise ValueError("must be non-negative")
         return v
 
@@ -679,6 +704,61 @@ class HomepagePromotionBody(BaseModel):
         return self
 
 
+class PromoBannerBody(BaseModel):
+    """Admin-managed homepage banner carousel item (CashKaro-style), shown above the
+    savings engine. Activation and scheduling are fully admin-controlled."""
+    model_config = {"extra": "forbid"}
+
+    image_url: str = Field(min_length=1, max_length=2048)
+    alt_text: str = Field(min_length=1, max_length=200)
+    title: Optional[str] = Field(default=None, max_length=120)
+    destination_url: Optional[str] = Field(default=None, max_length=2048)
+    display_rank: int = Field(default=0, ge=0)
+    active: bool = False
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+
+    @field_validator("alt_text")
+    @classmethod
+    def clean_alt_text(cls, value):
+        value = value.strip()
+        if not value:
+            raise ValueError("Alt text is required")
+        return value
+
+    @field_validator("title")
+    @classmethod
+    def clean_title(cls, value):
+        if value is None:
+            return None
+        value = value.strip()
+        return value or None
+
+    @field_validator("image_url")
+    @classmethod
+    def clean_image(cls, value):
+        image = _homepage_asset(value)
+        if not image:
+            raise ValueError("Banner image is required")
+        return image
+
+    @field_validator("destination_url")
+    @classmethod
+    def secure_destination(cls, value):
+        if value in (None, ""):
+            return None
+        value = value.strip()
+        if not _homepage_https_url(value):
+            raise ValueError("Destination must be an HTTPS URL")
+        return value
+
+    @model_validator(mode="after")
+    def valid_dates(self):
+        if self.start_date and self.end_date and self.start_date > self.end_date:
+            raise ValueError("End date must be on or after start date")
+        return self
+
+
 class GratitudeBody(BaseModel):
     idempotency_key: str
 
@@ -720,6 +800,10 @@ async def startup():
     await db.card_offers.create_index([("active", 1), ("valid_from", 1), ("valid_until", 1)])
 
     await db.homepage_promotions.create_index(
+        [("active", 1), ("start_date", 1), ("end_date", 1), ("display_rank", 1)])
+    # Homepage banner carousel (above the savings engine) — admin managed.
+    await db.promo_banners.create_index("id", unique=True)
+    await db.promo_banners.create_index(
         [("active", 1), ("start_date", 1), ("end_date", 1), ("display_rank", 1)])
 
     created = await seed_all(db)
@@ -1380,6 +1464,17 @@ async def public_store_detail(slug: str):
                                  key=lambda category: category["name"].casefold())
     store["category_groups"] = sorted(
         category_groups.get(store["id"], []), key=lambda group: group["name"].casefold())
+    affiliate_rules, _ = await _load_rates_for(store["id"])
+    current = [rule for rule in affiliate_rules
+               if _category_group_rule_is_current(rule, datetime.now(timezone.utc).date())]
+    # Advertised maxima are NOT transaction estimates: MOV, customer, product,
+    # category, card requirements and caps still apply during /calculate.
+    store["advertised_cashback"] = [
+        {"value_type": kind, "value": str(max(D(rule.get("value")) for rule in current
+                                             if rule.get("value_type", "percent") == kind))}
+        for kind in ("percent", "flat_amount")
+        if any(rule.get("value_type", "percent") == kind and D(rule.get("value")) > 0 for rule in current)
+    ]
     return store
 
 
@@ -1451,6 +1546,21 @@ async def public_homepage_promotions():
             for row in rows if row["store_id"] in slugs]
 
 
+@api.get("/public/banners")
+async def public_banners():
+    """Only active, currently-valid banners for the homepage carousel above the
+    savings engine. No admin-only fields are exposed here."""
+    today = datetime.now(timezone.utc).date().isoformat()
+    query = {"active": True, "$and": [
+        {"$or": [{"start_date": None}, {"start_date": {"$lte": today}}]},
+        {"$or": [{"end_date": None}, {"end_date": {"$gte": today}}]},
+    ]}
+    projection = {"_id": 0, "id": 1, "image_url": 1, "alt_text": 1,
+                  "title": 1, "destination_url": 1, "display_rank": 1}
+    return await db.promo_banners.find(query, projection).sort(
+        [("display_rank", 1), ("id", 1)]).to_list(50)
+
+
 @api.get("/public/platforms")
 async def public_platforms():
     plats = await db.platforms.find(public_filter(), {"_id": 0}).sort("name", 1).to_list(500)
@@ -1488,7 +1598,7 @@ async def _load_card_offers(store_id):
 
 async def _find_missing_card_opportunity(store, product_category, customer_type,
                                          mrp, price, affiliate_rules, giftcard_rules,
-                                         card_offers, owned_cards, actual_result):
+                                         card_offers, owned_cards, actual_result, product_url=None):
     """Return one validated non-owned card opportunity without changing actual savings."""
     if not card_offers or not store.get("id"):
         return {"available": False}
@@ -1519,7 +1629,7 @@ async def _find_missing_card_opportunity(store, product_category, customer_type,
         candidate_result = calculate_stack(
             store, product_category, customer_type, mrp, price,
             affiliate_rules, giftcard_rules, rate_version=RATE_VERSION,
-            card=candidate_card, card_offers=card_offers)
+            card=candidate_card, card_offers=card_offers, product_url=product_url)
         applied_offer = (candidate_result.get("card_offer") or {}).get("applied_offer")
         if not applied_offer:
             continue
@@ -1617,10 +1727,22 @@ async def calculate(body: CalcBody, request: Request):
 
     card_offers = await _load_card_offers(store.get("id"))
 
+    # Never use another merchant's URL as evidence for a product-specific rule.
+    # No fetching or new URL-detection service: reuse configured store domains.
+    product_url = None
+    if body.product_url and store.get("id"):
+        host = urlsplit(body.product_url).hostname.lower()
+        domains = await db.store_domains.find(
+            {"store_id": store["id"], "active": True},
+            {"_id": 0, "domain_or_alias": 1}).to_list(2000)
+        if any(host == domain or host.endswith("." + domain) for domain in
+               [(item.get("domain_or_alias") or "").strip().lower() for item in domains] if domain):
+            product_url = body.product_url
+
     def run_calculation(card=None):
         return calculate_stack(
             store, body.category, body.customer_type, body.mrp, body.price, aff, gc,
-            rate_version=RATE_VERSION, card=card,
+            rate_version=RATE_VERSION, card=card, product_url=product_url,
             card_offers=card_offers if card else [])
 
     baseline = run_calculation()
@@ -1678,7 +1800,7 @@ async def calculate(body: CalcBody, request: Request):
     }
     result["missing_card_opportunity"] = await _find_missing_card_opportunity(
         store, body.category, body.customer_type, body.mrp, body.price, aff, gc,
-        card_offers, all_saved_cards, result)
+        card_offers, all_saved_cards, result, product_url=product_url)
     result["fallback"] = fallback
 
     # Enrich routes with the partner's website (editable in the console) so the UI
@@ -1878,7 +2000,7 @@ def _assert_safe_email(subject, html):
                 raise ValueError("Email link text does not match its destination")
 
 
-def _contact_email_config():
+def _feedback_email_config():
     config = {
         "key": os.environ.get("EMERGENT_EMAIL_KEY"),
         "from_name": os.environ.get("EMAIL_FROM_NAME"),
@@ -1886,27 +2008,45 @@ def _contact_email_config():
         "reply_to": os.environ.get("EMAIL_REPLY_TO"),
     }
     if not all(config[field] for field in ("key", "from_name", "recipient")):
-        raise HTTPException(status_code=503, detail="Contact email delivery is not configured")
+        raise HTTPException(status_code=503, detail="Support email delivery is not configured")
     if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", config["recipient"]):
-        raise HTTPException(status_code=503, detail="Contact email recipient is invalid")
+        raise HTTPException(status_code=503, detail="Support email recipient is invalid")
     if config["reply_to"] and not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", config["reply_to"]):
-        raise HTTPException(status_code=503, detail="Contact email Reply-To is invalid")
+        raise HTTPException(status_code=503, detail="Support email Reply-To is invalid")
     return config
 
 
-async def _send_contact_notification(feedback_doc, config):
-    visitor_email = str(feedback_doc["email"])
+_FEEDBACK_KIND_LABELS = {
+    "contact": "Contact Us",
+    "report_rate": "Report an Incorrect Rate",
+    "suggest_store": "Suggest a Store or Platform",
+}
+
+
+async def _send_feedback_notification(feedback_doc, config):
+    kind = feedback_doc["kind"]
+    label = _FEEDBACK_KIND_LABELS.get(kind, "Feedback")
+    reference = feedback_doc["id"][:8]
+    visitor_email = feedback_doc.get("email")
     visitor_name = feedback_doc.get("name") or "Not provided"
     visitor_message = escape(feedback_doc["message"]).replace("\n", "<br>")
-    subject = "New YuktiCart contact message"
-    html = (
-        '<table role="presentation" width="100%"><tr><td style="padding:24px;font-family:Arial,sans-serif">'
-        '<h2 style="margin:0 0 18px">New contact message</h2>'
-        f'<p><strong>Name:</strong> {escape(visitor_name)}</p>'
+    visitor_context = feedback_doc.get("context")
+    subject = f"New YuktiCart {label} submission [{reference}]"
+    email_row = (
         f'<p><strong>Email:</strong> <a href="mailto:{escape(visitor_email, quote=True)}">'
         f'{escape(visitor_email)}</a></p>'
+        if visitor_email else "<p><strong>Email:</strong> Not provided</p>"
+    )
+    context_row = f"<p><strong>Context:</strong> {escape(visitor_context)}</p>" if visitor_context else ""
+    html = (
+        '<table role="presentation" width="100%"><tr><td style="padding:24px;font-family:Arial,sans-serif">'
+        f'<h2 style="margin:0 0 18px">New {escape(label)} submission</h2>'
+        f'<p><strong>Reference:</strong> {escape(reference)}</p>'
+        f'<p><strong>Name:</strong> {escape(visitor_name)}</p>'
+        f'{email_row}'
+        f'{context_row}'
         f'<p><strong>Message:</strong><br>{visitor_message}</p>'
-        '<p style="font-size:12px;color:#666">Submitted through the YuktiCart Contact Us form.</p>'
+        f'<p style="font-size:12px;color:#666">Submitted through the YuktiCart {escape(label)} form.</p>'
         '</td></tr></table>'
     )
     try:
@@ -1915,8 +2055,12 @@ async def _send_contact_notification(feedback_doc, config):
         raise HTTPException(status_code=400, detail="This message cannot be delivered safely") from exc
     payload = {"to": [config["recipient"]], "subject": subject, "html": html,
                "from_name": config["from_name"]}
-    if config.get("reply_to"):
-        payload["contact_email"] = config["reply_to"]
+    # Reply-To is the customer's own validated email (EmailStr) when given, so the
+    # owner can hit "reply" in their inbox and land directly on the customer —
+    # never a caller-supplied free-text address, and never used as the sender.
+    reply_to = visitor_email or config.get("reply_to")
+    if reply_to:
+        payload["contact_email"] = reply_to
 
     def deliver():
         response = requests.post(
@@ -1928,32 +2072,31 @@ async def _send_contact_notification(feedback_doc, config):
     try:
         return await asyncio.to_thread(deliver)
     except (requests.RequestException, ValueError) as exc:
-        logger.error("Contact email delivery failed: %s", exc)
+        logger.error("Feedback email delivery failed: %s", exc)
         raise HTTPException(status_code=502, detail="Unable to deliver your message right now") from exc
 
 
 @api.post("/feedback")
 async def feedback(body: FeedbackBody):
-    email_config = _contact_email_config() if body.kind == "contact" else None
     doc = {
         "id": str(uuid.uuid4()), "kind": body.kind, "name": body.name,
         "email": str(body.email) if body.email else None,
         "message": body.message, "context": body.context,
         "timestamp": now_iso(), "status": "new",
-        "delivery_status": "pending" if body.kind == "contact" else "not_required",
+        "delivery_status": "pending",
     }
+    # Safely queue the submission first — it is never lost even if email below fails.
     await db.feedback.insert_one(dict(doc))
-    if body.kind == "contact":
-        try:
-            email_id = await _send_contact_notification(doc, email_config)
-        except HTTPException:
-            await db.feedback.update_one({"id": doc["id"]}, {"$set": {"delivery_status": "failed"}})
-            raise
-        await db.feedback.update_one(
-            {"id": doc["id"]},
-            {"$set": {"delivery_status": "sent", "email_id": email_id, "delivered_at": now_iso()}})
-        return {"ok": True, "delivery_status": "sent"}
-    return {"ok": True, "delivery_status": "not_required"}
+    try:
+        email_config = _feedback_email_config()
+        email_id = await _send_feedback_notification(doc, email_config)
+    except HTTPException:
+        await db.feedback.update_one({"id": doc["id"]}, {"$set": {"delivery_status": "failed"}})
+        raise
+    await db.feedback.update_one(
+        {"id": doc["id"]},
+        {"$set": {"delivery_status": "sent", "email_id": email_id, "delivered_at": now_iso()}})
+    return {"ok": True, "delivery_status": "sent"}
 
 
 @api.post("/feedback/result")
@@ -2472,6 +2615,53 @@ async def deactivate_homepage_promotion(promotion_id: str, request: Request,
     await db.homepage_promotions.update_one({"id": promotion_id}, {"$set": {
         "active": False, "updated_at": now_iso()}})
     await audit(user, "deactivate", "homepage_promotion", promotion_id, before, None, request)
+    return {"deactivated": True}
+
+
+# ---- Homepage banner carousel (above the savings engine) ----
+@api.get("/admin/banners")
+async def admin_banners(user=Depends(require_any_role)):
+    return await db.promo_banners.find({}, {"_id": 0}).sort(
+        [("display_rank", 1), ("id", 1)]).to_list(200)
+
+
+@api.post("/admin/banners", status_code=201)
+async def create_banner(body: PromoBannerBody, request: Request,
+                        user=Depends(require_write)):
+    data = body.model_dump(mode="json")
+    doc = {**data, "id": str(uuid.uuid4()), "created_at": now_iso(), "updated_at": now_iso()}
+    await db.promo_banners.insert_one(dict(doc))
+    await audit(user, "create", "promo_banner", doc["id"], None, doc, request)
+    return doc
+
+
+@api.put("/admin/banners/{banner_id}")
+async def update_banner(banner_id: str, body: dict, request: Request,
+                        user=Depends(require_write)):
+    before = await db.promo_banners.find_one({"id": banner_id}, {"_id": 0})
+    if not before:
+        raise HTTPException(404, "Banner not found")
+    if not body or not set(body).issubset(PromoBannerBody.model_fields):
+        raise HTTPException(400, "Unknown or empty banner fields")
+    merged = {field: before.get(field) for field in PromoBannerBody.model_fields}
+    merged.update(body)
+    data = _homepage_data(PromoBannerBody, merged)
+    data["updated_at"] = now_iso()
+    await db.promo_banners.update_one({"id": banner_id}, {"$set": data})
+    after = await db.promo_banners.find_one({"id": banner_id}, {"_id": 0})
+    await audit(user, "update", "promo_banner", banner_id, before, after, request)
+    return after
+
+
+@api.delete("/admin/banners/{banner_id}")
+async def deactivate_banner(banner_id: str, request: Request,
+                            user=Depends(require_write)):
+    before = await db.promo_banners.find_one({"id": banner_id}, {"_id": 0})
+    if not before:
+        raise HTTPException(404, "Banner not found")
+    await db.promo_banners.update_one({"id": banner_id}, {"$set": {
+        "active": False, "updated_at": now_iso()}})
+    await audit(user, "deactivate", "promo_banner", banner_id, before, None, request)
     return {"deactivated": True}
 
 
