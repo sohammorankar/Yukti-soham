@@ -3,6 +3,7 @@ import { PageShell } from "@/components/site/PageShell";
 import { api, formatApiErrorDetail } from "@/lib/api";
 import { toast } from "sonner";
 import { Mail, Send } from "lucide-react";
+import { trackEvent } from "@/lib/analytics";
 
 const CONFIG = {
   contact: { title: "Contact Us", kicker: "Company", desc: "Questions, partnerships or press — reach out and we'll reply to your email.", label: "Your message" },
@@ -16,15 +17,23 @@ export function FeedbackPage({ kind }) {
   const [email, setEmail] = useState("");
   const [message, setMessage] = useState("");
   const [sent, setSent] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
   const submit = async (e) => {
     e.preventDefault();
     if (!message.trim()) { toast.error("Please add a message"); return; }
+    if (submitting) return; // guards against a duplicate event/request from a fast double-click
+    setSubmitting(true);
+    // Tracks the user's submit action itself (the form data is always safely
+    // queued server-side), independent of whether the Phase 5 email notification
+    // to yukticart@gmail.com succeeds — that is an unrelated delivery concern.
+    trackEvent("contact_form_submitted", { form_type: kind });
     try {
       await api.post("/feedback", { kind, name, email: email || undefined, message });
       setSent(true); setMessage(""); setName(""); setEmail("");
       toast.success("Thank you — we've received your message.");
     } catch (err) { toast.error(formatApiErrorDetail(err.response?.data?.detail)); }
+    finally { setSubmitting(false); }
   };
 
   return (
@@ -59,9 +68,9 @@ export function FeedbackPage({ kind }) {
             <textarea value={message} onChange={(e) => setMessage(e.target.value)} rows={5} data-testid="feedback-message"
               className="focus-ring w-full rounded-md border border-border bg-input p-3 text-sm text-foreground" />
           </div>
-          <button type="submit" data-testid="feedback-submit"
-            className="btn-gold focus-ring inline-flex items-center gap-2 rounded-full px-6 py-3 text-sm font-700">
-            <Send className="h-4 w-4" /> Send message
+          <button type="submit" data-testid="feedback-submit" disabled={submitting}
+            className="btn-gold focus-ring inline-flex items-center gap-2 rounded-full px-6 py-3 text-sm font-700 disabled:opacity-60">
+            <Send className="h-4 w-4" /> {submitting ? "Sending…" : "Send message"}
           </button>
         </form>
       )}
