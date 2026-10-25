@@ -1,14 +1,16 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { Link2, Store, Tags, Calculator, Info, BadgeCheck, HelpCircle, Frown, Smile, Loader2, CreditCard } from "lucide-react";
+import { Link2, Store, Tags, Calculator, Info, BadgeCheck, HelpCircle, Frown, Smile, Loader2, CreditCard, ArrowUpRight, X } from "lucide-react";
 import { Combobox } from "@/components/Combobox";
+import { ProductImageInput } from "@/components/site/ProductImageInput";
 import {
   Tooltip, TooltipContent, TooltipProvider, TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { api } from "@/lib/api";
-import { money } from "@/lib/format";
+import { api, formatApiErrorDetail } from "@/lib/api";
+import { money, rateLabel } from "@/lib/format";
 import { toast } from "sonner";
 import { useAuth } from "@/context/AuthContext";
+import { trackEvent } from "@/lib/analytics";
 
 // Lightweight check so we only call /api/detect when the URL is "complete enough".
 // Requires a domain-like token (something.tld) — avoids firing on partial typing.
@@ -40,7 +42,18 @@ export function SavingsEngine({ onResult, initial, initialStores }) {
   const [detecting, setDetecting] = useState(false);
   const [detectError, setDetectError] = useState("");
   const [detectedStoreName, setDetectedStoreName] = useState(null);
+  const [storeDetails, setStoreDetails] = useState(null);
   const lastDetectedUrlRef = useRef("");
+  const detectionRequest = useRef(0);
+  const inputsKey = JSON.stringify([storeId, category, customerType, mrp, price, url]);
+  const currentInputs = useRef(inputsKey);
+  currentInputs.current = inputsKey;
+
+  useEffect(() => {
+    setLastResult(null);
+    onResult(null);
+  }, [inputsKey, onResult]);
+  useEffect(() => () => { detectionRequest.current += 1; currentInputs.current = null; }, []);
 
   useEffect(() => {
     if (initialStores) { setStores(initialStores); return; }
@@ -51,7 +64,7 @@ export function SavingsEngine({ onResult, initial, initialStores }) {
 
   useEffect(() => {
     if (initial) {
-      setStoreId(initial.store_id || ""); setCategory(initial.category || "All");
+      setStoreId(initial.store_id || ""); setCategory(initial.category || "");
       setCustomerType(initial.customer_type || "existing");
       setMrp(String(initial.mrp || "")); setPrice(String(initial.price || ""));
       if (initial.url) setUrl(initial.url);
@@ -110,11 +123,13 @@ export function SavingsEngine({ onResult, initial, initialStores }) {
     setCategoryGroups([]);
     setCategoryGroup("");
     setCategoriesForStore("");
-    if (!storeSlug || !showCategory) return;
+    setStoreDetails(null);
+    if (!storeSlug) return;
     let cancelled = false;
     api.get(`/public/stores/${encodeURIComponent(storeSlug)}`)
       .then(({ data }) => {
         if (cancelled) return;
+        setStoreDetails(data);
         const available = (Array.isArray(data.categories) ? data.categories : [])
           .filter((c) => (c?.name || "").trim().toLowerCase() !== "all");
         const groups = (Array.isArray(data.category_groups) ? data.category_groups : [])
@@ -139,7 +154,7 @@ export function SavingsEngine({ onResult, initial, initialStores }) {
         if (!cancelled) { setCategory(""); toast.error("Could not load store categories"); }
       });
     return () => { cancelled = true; };
-  }, [storeId, storeSlug, showCategory]);
+    }, [storeId, storeSlug, showCategory]);
 
   // When the store changes (manually or via URL detection), drop any stale value
   // for a dimension that no longer applies so it is never sent into the calc.
@@ -152,19 +167,22 @@ export function SavingsEngine({ onResult, initial, initialStores }) {
   const isAmazonFlipkart = amazonFlipkart ||
     ["amazon", "flipkart"].includes((selectedStore?.name || "").toLowerCase());
 
-  const runDetect = async (raw) => {
-    const target = ((raw ?? url) || "").trim();
+  const runDetect = useCallback(async (raw) => {
+    const target = (raw || "").trim();
     if (!target) return;
     if (!looksLikeUrl(target)) {
-      setDetectError("That doesn't look like a valid product link. You can still choose the store and category manually below.");
+      setDetectError("That doesn't look like a valid link. You can choose a store instead.");
       return;
     }
     if (target === lastDetectedUrlRef.current) return; // avoid duplicate calls for the same URL
     lastDetectedUrlRef.current = target;
+    trackEvent("product_url_submitted");
+    const requestId = ++detectionRequest.current;
     setDetecting(true);
     setDetectError("");
     try {
       const { data } = await api.post("/detect", { url: target });
+      if (requestId !== detectionRequest.current) return;
       setAmazonFlipkart(!!data.amazon_flipkart_notice);
       if (data.store?.store_id) {
         setStoreId(data.store.store_id);
@@ -178,17 +196,19 @@ export function SavingsEngine({ onResult, initial, initialStores }) {
         setDetectedCategory(data.category.category);
       } else {
         setDetection(null);
+        setCategory(""); setDetectedCategory(null);
       }
       if (!data.store?.store_id && !data.category?.category) {
-        setDetectError("We couldn't recognize this link automatically. Please choose the store and category manually below.");
+        setDetectError("This link isn't recognized. Choose its store instead; category is optional.");
       }
     } catch {
+      if (requestId !== detectionRequest.current) return;
       lastDetectedUrlRef.current = ""; // allow a retry on a transient failure
-      setDetectError("We couldn't detect this link right now. Please choose the store and category manually below.");
+      setDetectError("Couldn't detect this link. Try again or choose a store instead.");
     } finally {
-      setDetecting(false);
+      if (requestId === detectionRequest.current) setDetecting(false);
     }
-  };
+  }, []);
 
   // Auto-detect after a short debounce once the URL looks complete (no Detect button needed).
   useEffect(() => {
@@ -196,10 +216,13 @@ export function SavingsEngine({ onResult, initial, initialStores }) {
     if (!v || !looksLikeUrl(v) || v === lastDetectedUrlRef.current) return;
     const t = setTimeout(() => runDetect(v), 700);
     return () => clearTimeout(t);
-  }, [url]);
+  }, [url, runDetect]);
 
   const onStoreChange = (val) => {
     if (val !== storeId) {
+      detectionRequest.current += 1;
+      lastDetectedUrlRef.current = "";
+      setUrl(""); setDetecting(false); setDetectError(""); setAmazonFlipkart(false);
       setCategories([]);
       setCategoryGroups([]);
       setCategoryGroup("");
@@ -235,11 +258,13 @@ export function SavingsEngine({ onResult, initial, initialStores }) {
 
   const calculate = async () => {
     if (!selectedStore) { toast.error("Please choose a store"); return; }
-    if (!price) { toast.error("Enter the selling price"); return; }
+    if (!price || !Number.isFinite(Number(price)) || Number(price) <= 0) { toast.error("Enter a selling price greater than zero"); return; }
+    if (mrp && (!Number.isFinite(Number(mrp)) || Number(mrp) < 0)) { toast.error("Enter a valid MRP"); return; }
     if (mrp && Number(price) > Number(mrp)) { toast.error("Selling price cannot exceed MRP"); return; }
-    if (showCategory && !categories.some((item) => item.name === category)) {
-      toast.error("Please choose a category"); return;
+    if (showCategory && category && !categories.some((item) => item.name === category)) {
+      toast.error("Choose an available category or leave it blank"); return;
     }
+    const submittedInputs = currentInputs.current;
     setLoading(true);
     try {
       const { data } = await api.post("/calculate", {
@@ -248,33 +273,54 @@ export function SavingsEngine({ onResult, initial, initialStores }) {
         ...(showCategory && category ? { category } : {}),
         ...(showCustomerType ? { customer_type: customerType } : {}),
         ...(mrp ? { mrp: Number(mrp) } : {}),
+        ...(url.trim() && looksLikeUrl(url) ? { product_url: url.trim() } : {}),
       });
+      if (submittedInputs !== currentInputs.current) return;
       setLastResult(data);
+      trackEvent("calculation_completed", {
+        store: selectedStore?.name,
+        gift_card_applied: Boolean(data.gift_card?.applied),
+        cashback_applied: Boolean(data.affiliate?.applied),
+      });
       onResult(data);
       setTimeout(() => document.getElementById("results-anchor")?.scrollIntoView({ behavior: "smooth", block: "start" }), 60);
-    } catch { toast.error("Calculation failed"); }
+    } catch (err) { toast.error(formatApiErrorDetail(err.response?.data?.detail || "Calculation failed")); }
     finally { setLoading(false); }
   };
 
   return (
     <TooltipProvider delayDuration={150}>
-      <div className="surface rounded-2xl p-5 sm:p-7" data-testid="savings-engine">
-        {/* URL — auto-detects store & category (debounced + on blur); no button needed */}
-        <label className="mb-1.5 block text-xs font-600 uppercase tracking-wide text-ink-muted">Product URL</label>
+      <div className="min-w-0" data-testid="savings-engine">
+        <div className="grid grid-cols-1 gap-6 border-b border-border pb-6 md:grid-cols-3" data-testid="engine-input-methods">
+          <ProductImageInput stores={stores} onApply={({ storeId: nextStore, price: nextPrice }) => {
+            onStoreChange(nextStore); setPrice(nextPrice); setMrp("");
+            setUrl(""); setCategory(""); setCategoryGroup(""); setDetection(null); setDetectedCategory(null);
+            setDetectedStoreName(null); setDetectError(""); setAmazonFlipkart(false); setDetecting(false);
+            detectionRequest.current += 1; lastDetectedUrlRef.current = "";
+          }} />
+          <div className="min-w-0" data-testid="url-input-method">
+        <h2 className="mb-2 flex items-center gap-2 text-base font-600 text-ink"><Link2 className="h-4 w-4 text-gold" /> Product / cart URL</h2>
         <div className="relative">
           <Link2 className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-muted" />
           <input
             value={url}
-            onChange={(e) => { setUrl(e.target.value); if (detectError) setDetectError(""); }}
-            onBlur={() => runDetect()}
-            placeholder="Paste an Amazon, Flipkart, Myntra… product link"
+            onChange={(e) => {
+              detectionRequest.current += 1; lastDetectedUrlRef.current = "";
+              setUrl(e.target.value); setDetectError(""); setDetecting(false);
+              setDetectedStoreName(null); setStoreId(""); setCategory(""); setCategoryGroup("");
+              setDetection(null); setDetectedCategory(null); setAmazonFlipkart(false);
+            }}
+            onBlur={() => runDetect(url)}
+            placeholder="Paste a supported store link"
+            aria-label="Product or cart URL"
             data-testid="input-url"
-            className="focus-ring h-11 w-full rounded-md border border-border bg-white pl-9 pr-10 text-sm text-black placeholder:text-slate-500"
+            className="focus-ring h-11 w-full rounded-md border border-border bg-input pl-9 pr-10 text-sm text-foreground placeholder:text-muted-foreground"
           />
           {detecting && (
             <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-gold" data-testid="detect-loading" />
           )}
         </div>
+        <p className="mt-2 text-xs text-ink-muted" data-testid="url-input-note">Private carts may need a screenshot or manually entered total.</p>
         {detecting && (
           <p className="mt-1.5 text-[11px] text-ink-muted" data-testid="detect-status">Detecting store &amp; category…</p>
         )}
@@ -288,26 +334,33 @@ export function SavingsEngine({ onResult, initial, initialStores }) {
             <BadgeCheck className="h-3 w-3" /> Detected store: {detectedStoreName}
           </p>
         )}
-
-        <div className="mt-5 grid gap-4 sm:grid-cols-2">
-          {/* Store */}
-          <div className={showCategory ? "" : "sm:col-span-2"}>
-            <label className="mb-1.5 flex items-center gap-1.5 text-xs font-600 uppercase tracking-wide text-ink-muted">
-              <Store className="h-3.5 w-3.5" /> Store
-            </label>
+          </div>
+          <div className="min-w-0" data-testid="store-input-method">
+            <h2 className="mb-2 flex items-center gap-2 text-base font-600 text-ink"><Store className="h-4 w-4 text-gold" /> Brand / store</h2>
             <Combobox options={storeOptions} value={storeId} onChange={onStoreChange}
               placeholder="Choose store" testid="select-store" ariaLabel="Select store" />
+            {selectedStore?.slug && <Link to={`/stores/${encodeURIComponent(selectedStore.slug)}`} target="_blank" rel="noopener noreferrer"
+              data-testid="explore-store-offers" className="focus-ring mt-2 inline-flex items-center gap-1 text-xs text-gold hover:underline">
+              Explore {selectedStore.name} offers <ArrowUpRight className="h-3.5 w-3.5" />
+            </Link>}
+            {storeDetails?.id === storeId && storeDetails.advertised_cashback?.length > 0 && (
+              <div className="mt-3 text-xs text-ink-muted" data-testid="advertised-cashback">
+                <p className="font-600 text-gold">Advertised cashback: {storeDetails.advertised_cashback.map((rate) => `up to ${rateLabel(rate.value_type, rate.value)}`).join(" / ")}</p>
+                <p className="mt-1">Offer maximums, not your transaction estimate. Eligibility, minimum spend and caps apply.</p>
+              </div>
+            )}
           </div>
+        </div>
 
           {/* Category — shown only when the store's affiliate payout depends on category */}
           {showCategory && (
-            <div data-testid="category-field">
-              <label className="mb-1.5 flex items-center gap-1.5 text-xs font-600 uppercase tracking-wide text-ink-muted">
-                <Tags className="h-3.5 w-3.5" /> Category
+            <div className="mt-5 max-w-xl" data-testid="category-field">
+              <label className="mb-1.5 flex flex-wrap items-center gap-1.5 text-xs font-600 uppercase tracking-wide text-ink-muted">
+                <Tags className="h-3.5 w-3.5" /> Category · optional
                 {detection && (
                   detection.band === "high" ? (
                     <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-savings/15 px-2 py-0.5 text-[10px] normal-case text-savings" data-testid="cat-detected">
-                      <BadgeCheck className="h-3 w-3" /> Detected · {Math.round(detection.confidence * 100)}%
+                      <BadgeCheck className="h-3 w-3" /> Suggested · please verify
                     </span>
                   ) : (
                     <span className="ml-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] normal-case text-amber-400" data-testid="cat-verify">
@@ -318,8 +371,11 @@ export function SavingsEngine({ onResult, initial, initialStores }) {
               </label>
               <Combobox options={catOptions} value={selectedCategoryGroup?.name || categoryGroup}
                 onChange={onCategoryGroupChange}
-                placeholder="Choose category" testid="select-category" ariaLabel="Select category" />
-              {selectedCategoryGroup?.categories.length > 1 && !category && (
+                placeholder="No category selected" testid="select-category" ariaLabel="Select category (optional)" />
+              {(category || categoryGroup) && <button type="button" data-testid="clear-category" aria-label="Clear optional category"
+                onClick={() => { setCategory(""); setCategoryGroup(""); setDetection(null); setDetectedCategory(null); }}
+                className="focus-ring mt-2 inline-flex items-center gap-1 text-xs text-ink-muted hover:text-gold"><X className="h-3 w-3" /> Clear category</button>}
+              {selectedCategoryGroup?.categories.length > 1 && (
                 <div className="mt-2" data-testid="exact-category-field">
                   <label className="mb-1 block text-[11px] font-600 text-ink-muted">Exact category</label>
                   <Combobox options={exactCategoryOptions} value={category} onChange={onCategoryChange}
@@ -328,13 +384,13 @@ export function SavingsEngine({ onResult, initial, initialStores }) {
                 </div>
               )}
               {detection?.explanation && (
-                <p className="mt-1 text-[11px] text-ink-muted">{detection.explanation}</p>
+                <p className="mt-1 text-[11px] text-ink-muted" data-testid="category-detection-explanation">{detection.explanation}</p>
               )}
+              {!category && <p className="mt-2 text-xs text-ink-muted" data-testid="optional-category-note">Category-dependent cashback stays unconfirmed until a category is selected.</p>}
             </div>
           )}
-        </div>
 
-        <div className="mt-4 flex items-center gap-2 rounded-md border border-dashed border-border px-3 py-2.5 text-xs text-ink-muted" data-testid="automatic-card-check">
+        <div className="mt-4 flex flex-wrap items-center gap-2 rounded-md border border-dashed border-border px-3 py-2.5 text-xs text-ink-muted" data-testid="automatic-card-check">
           <CreditCard className="h-4 w-4 shrink-0 text-gold" />
           <span>YuktiCart automatically checks your saved cards.</span>
           {isAuthed && (
@@ -413,7 +469,7 @@ export function SavingsEngine({ onResult, initial, initialStores }) {
           customerType={customerType} lastResult={lastResult} />
 
         <button
-          onClick={calculate} disabled={loading} data-testid="btn-calculate"
+          onClick={calculate} disabled={loading || detecting} data-testid="btn-calculate"
           className="btn-gold focus-ring mt-4 flex w-full items-center justify-center gap-2 rounded-full py-3.5 text-base font-700 transition-transform active:scale-[0.99] disabled:opacity-60"
         >
           <Calculator className="h-5 w-5" /> {loading ? "Calculating…" : "Find Best Savings Stack"}
@@ -439,7 +495,7 @@ function MoneyMeter({ mrp, price, store, category, customerType, lastResult }) {
   else if (hasInputs) state = "worried";
 
   const cfg = {
-    idle: { border: "border-border", bg: "", face: null, title: "Enter MRP & price to reveal your optimized savings.", sub: "" },
+    idle: { border: "border-border", bg: "", face: null, title: "Selling price required · MRP and category optional", sub: "" },
     worried: {
       border: "border-destructive/40", bg: "bg-destructive/5", face: "sad",
       title: "STOP! You might be leaving money on the table.",
@@ -447,8 +503,8 @@ function MoneyMeter({ mrp, price, store, category, customerType, lastResult }) {
     },
     happy: {
       border: "border-savings/50", bg: "bg-savings/5", face: "happy",
-      title: happy ? `You saved ${money(lastResult.summary.extra_saved)} extra with YuktiCart!` : "",
-      sub: "Smart stack — follow the checkout sequence below.",
+      title: happy ? `Potential extra savings: ${money(lastResult.summary.extra_saved)}` : "",
+      sub: "Estimate only — partner terms and approval apply.",
     },
   }[state];
 
