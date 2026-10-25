@@ -1,9 +1,10 @@
 import "@/index.css";
-import React from "react";
+import React, { useEffect } from "react";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { Toaster } from "@/components/ui/sonner";
 import { ThemeProvider } from "@/context/ThemeContext";
 import { AuthProvider } from "@/context/AuthContext";
+import { initAnalytics } from "@/lib/analytics";
 
 import SiteLayout from "@/components/site/SiteLayout";
 import { HomeStartupGate } from "@/components/site/HomeStartupGate";
@@ -27,6 +28,7 @@ import Platforms from "@/pages/admin/Platforms";
 import Stores from "@/pages/admin/Stores";
 import HomepageCategories from "@/pages/admin/HomepageCategories";
 import HomepagePromotions from "@/pages/admin/HomepagePromotions";
+import Banners from "@/pages/admin/Banners";
 import CategoriesAdmin from "@/pages/admin/CategoriesAdmin";
 import Rates from "@/pages/admin/Rates";
 import Matrix from "@/pages/admin/Matrix";
@@ -37,6 +39,7 @@ import UserFeedback from "@/pages/admin/UserFeedback";
 import CardOffers from "@/pages/admin/CardOffers";
 
 export default function App() {
+  useEffect(() => { initAnalytics(); }, []);
   return (
     <ThemeProvider>
       <BrowserRouter>
@@ -78,6 +81,7 @@ export default function App() {
               <Route path="stores" element={<Stores />} />
               <Route path="homepage/categories" element={<HomepageCategories />} />
               <Route path="homepage/promotions" element={<HomepagePromotions />} />
+              <Route path="homepage/banners" element={<Banners />} />
               <Route path="categories" element={<CategoriesAdmin />} />
               <Route path="rates" element={<Rates />} />
               <Route path="matrix" element={<Matrix />} />
