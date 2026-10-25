@@ -84,10 +84,10 @@ export default function Home() {
       {magic && <YuktiMagic onDone={() => setMagic(false)} />}
       <BannerCarousel banners={banners} />
       {/* Hero + engine */}
-      <section className="relative overflow-hidden border-b border-border pb-14 sm:pb-16">
+      <section className="relative !mt-0 overflow-hidden border-b border-border pb-14 sm:pb-16">
         <div className="grid-texture pointer-events-none absolute inset-0 opacity-30" />
         <div className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-gold/35 to-transparent" />
-        <div className="mx-auto grid max-w-7xl gap-12 px-4 pt-12 sm:px-6 lg:pt-20">
+        <div className="mx-auto grid max-w-7xl gap-12 px-4 pt-8 sm:px-6 sm:pt-10">
           <div className="flex max-w-3xl flex-col justify-center">
             <motion.span
               initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
