@@ -48,7 +48,7 @@ export function Footer() {
     <footer className="mt-24 border-t border-border" data-testid="site-footer">
       <div className="mx-auto grid max-w-7xl gap-10 px-4 py-14 sm:px-6 lg:grid-cols-[1.4fr_repeat(4,1fr)]">
         <div className="max-w-xs">
-          <Logo showTagline={false} />
+          <Logo testId="footer-logo" />
           <p className="mt-4 text-sm leading-relaxed text-ink-muted">
             A tactical savings and checkout-stack engine for Indian shoppers. We find the
             mathematically best payment route across affiliate cashback and discounted gift cards.
