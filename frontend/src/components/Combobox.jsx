@@ -27,14 +27,14 @@ export function Combobox({ options, value, onChange, placeholder = "Select…", 
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-60" />
         </button>
       </PopoverTrigger>
-      <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+      <PopoverContent className="w-[--radix-popover-trigger-width] max-w-[calc(100vw-2rem)] p-0" align="start" data-testid={testid ? `${testid}-menu` : undefined}>
         <Command>
           <div className="flex items-center border-b border-border px-3">
             <Search className="mr-2 h-4 w-4 opacity-50" />
-            <CommandInput placeholder="Search…" className="h-10" />
+            <CommandInput placeholder="Search…" className="h-10" data-testid={testid ? `${testid}-search` : undefined} />
           </div>
           <CommandList>
-            <CommandEmpty>No match found.</CommandEmpty>
+            <CommandEmpty data-testid={testid ? `${testid}-empty` : undefined}>No match found.</CommandEmpty>
             <CommandGroup>
               {options.map((o) => (
                 <CommandItem
