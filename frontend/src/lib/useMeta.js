@@ -1,6 +1,11 @@
 import { useEffect } from "react";
 
-export function useMeta(title, description) {
+// Canonical URLs always point at the production domain, even when this page is
+// viewed from a preview/staging host — so search engines never index a preview
+// URL as a separate/duplicate site. Update this if the production domain changes.
+const PRODUCTION_ORIGIN = "https://yukticart.com";
+
+export function useMeta(title, description, path) {
   useEffect(() => {
     document.title = title;
     const set = (name, content, attr = "name") => {
@@ -13,5 +18,10 @@ export function useMeta(title, description) {
     if (description) set("og:description", description, "property");
     set("twitter:card", "summary_large_image");
     set("twitter:title", title);
-  }, [title, description]);
+
+    const canonicalPath = path ?? window.location.pathname;
+    let link = document.querySelector('link[rel="canonical"]');
+    if (!link) { link = document.createElement("link"); link.setAttribute("rel", "canonical"); document.head.appendChild(link); }
+    link.setAttribute("href", `${PRODUCTION_ORIGIN}${canonicalPath}`);
+  }, [title, description, path]);
 }
