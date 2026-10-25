@@ -101,9 +101,14 @@ export function CashbackDisclaimer() {
 export function CookiePolicy() {
   return (
     <PageShell title="Cookie Policy" kicker="Trust & Legal"
-      description="We use minimal cookies and local storage.">
+      description="We use minimal cookies, local storage and analytics.">
       <Block h="Essential only"><p>We store your chosen visual direction and a one-time intro flag locally.
-        Admin authentication uses secure session cookies. We do not use advertising trackers.</p></Block>
+        Admin authentication uses secure session cookies.</p></Block>
+      <Block h="Analytics"><p>We use Google Analytics to understand how shoppers use YuktiCart — for
+        example when a product link or image is submitted, a calculation completes, an offer is selected,
+        a redirect to a partner happens, or a support form is submitted. We do not send passwords, messages,
+        uploaded images, full invoices or gift-card codes to analytics, and we do not use advertising
+        trackers or ad-personalization cookies.</p></Block>
     </PageShell>
   );
 }
