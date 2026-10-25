@@ -1,18 +1,16 @@
 import React from "react";
 import { Link } from "react-router-dom";
-import { ShoppingCart, Sparkles } from "lucide-react";
 
-// Wordmark styled after the provided brand: orange cart badge + "Yukti"+"Cart"+".com"
+// Brand mark: shared, replaceable SVG asset at /public/assets/brand/logo-mark.svg
+// (source: frontend/public/assets/brand/logo-mark.svg). Swap that one file in
+// GitHub to update the icon mark everywhere it appears (nav, mobile nav, footer).
+// The "YuktiCart.com" wordmark below stays as live, theme-reactive text/colour.
 export function Logo({ to = "/", showTagline = true, size = "md" }) {
-  const badge = size === "sm" ? "h-8 w-8" : "h-9 w-9";
+  const markPx = size === "sm" ? 36 : 40;
   const text = size === "sm" ? "text-lg" : "text-xl";
   const inner = (
     <div className="flex items-center gap-2">
-      <span className={`relative grid ${badge} place-items-center rounded-xl`}
-        style={{ background: "linear-gradient(150deg,#1c1c20,#0a0a0b)", border: "1px solid var(--hairline)" }}>
-        <ShoppingCart className="h-4 w-4" style={{ color: "#f59e0b" }} />
-        <Sparkles className="absolute -right-1 -top-1 h-3 w-3" style={{ color: "#fbbf24" }} />
-      </span>
+      <img src="/assets/brand/logo-mark.svg" alt="YuktiCart" width={markPx} height={markPx} className="shrink-0" />
       <div className="leading-none">
         <span className={`font-display ${text} font-600 tracking-tight`}>
           <span className="text-ink">Yukti</span>
