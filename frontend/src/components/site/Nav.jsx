@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Menu, X, Palette, LogIn, LogOut, CreditCard, Search, LifeBuoy, MessageCircle } from "lucide-react";
+import { Menu, X, Palette, LogIn, LogOut, CreditCard, Search, LifeBuoy, MessageCircle, HelpCircle } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
 import { useAuth } from "@/context/AuthContext";
 import { Logo } from "@/components/site/Logo";
@@ -25,7 +25,7 @@ function ProfileAvatar({ user, size = "h-6 w-6" }) {
   );
 }
 
-export function Nav() {
+export function Nav({ onOpenGuide }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const { reopenSelector } = useTheme();
@@ -79,6 +79,15 @@ export function Nav() {
             className="focus-ring hidden h-9 items-center gap-1.5 rounded-full border border-border px-3 text-sm text-ink-muted transition-colors hover:text-gold sm:inline-flex">
             <LifeBuoy className="h-4 w-4 text-gold" /> Support
           </Link>
+
+          <button
+            onClick={onOpenGuide}
+            data-testid="nav-how-it-works"
+            title="How YuktiCart works"
+            aria-label="Open the How YuktiCart works guide"
+            className="focus-ring hidden h-9 items-center gap-1.5 rounded-full border border-border px-3 text-sm text-ink-muted transition-colors hover:text-gold lg:inline-flex">
+            <HelpCircle className="h-4 w-4 text-gold" /> How it works
+          </button>
 
           <a href={WHATSAPP_URL} target="_blank" rel="noreferrer"
             data-testid="nav-whatsapp" title="Chat with YuktiCart Support on WhatsApp"
@@ -138,6 +147,12 @@ export function Nav() {
       {open && (
         <div className="border-t border-border px-4 py-3 lg:hidden" data-testid="nav-mobile-menu">
           <div className="flex flex-col gap-1">
+            <button
+              onClick={() => { setOpen(false); onOpenGuide?.(); }}
+              data-testid="nav-how-it-works-mobile"
+              className="flex items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-ink-muted hover:text-gold">
+              <HelpCircle className="h-4 w-4 text-gold" /> How YuktiCart works
+            </button>
             <Link to="/contact" onClick={() => setOpen(false)} data-testid="nav-support-mobile"
               className="rounded-md px-3 py-2 text-sm text-ink-muted hover:text-gold">Support</Link>
             <a href={WHATSAPP_URL} target="_blank" rel="noreferrer" data-testid="nav-whatsapp-mobile"
