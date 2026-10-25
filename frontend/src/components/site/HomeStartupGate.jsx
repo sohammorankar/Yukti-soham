@@ -54,19 +54,20 @@ export function HomeStartupGate({ children }) {
         if (stopped || expired) return;
 
         setMessage("Getting today's savings options ready...");
-        const [stores, homepageStores, categories, promotions] = await Promise.all([
+        const [stores, homepageStores, categories, promotions, banners] = await Promise.all([
           api.get("/public/stores", { signal: controller.signal }),
           api.get("/public/stores?homepage=true&limit=5", { signal: controller.signal }),
           api.get("/public/homepage/categories", { signal: controller.signal }),
           api.get("/public/homepage/promotions", { signal: controller.signal }),
+          api.get("/public/banners", { signal: controller.signal }),
         ]);
-        if (![stores, homepageStores, categories, promotions].every((response) => Array.isArray(response.data))) {
+        if (![stores, homepageStores, categories, promotions, banners].every((response) => Array.isArray(response.data))) {
           throw new Error("Homepage data unavailable");
         }
         if (stopped || expired) return;
         startupComplete = true;
         setBootstrap({ stores: stores.data, homepageStores: homepageStores.data,
-          categories: categories.data, promotions: promotions.data });
+          categories: categories.data, promotions: promotions.data, banners: banners.data });
       } catch {
         if (stopped || expired) return;
         const remaining = deadline - Date.now();
