@@ -81,8 +81,10 @@ export const ProductImageInput = ({ stores, onApply }) => {
         {busy ? "Reading…" : preview ? "Replace image" : "Choose image"}
       </button>
       <p className="mt-2 text-xs text-ink-muted" data-testid="image-privacy-note">PNG, JPEG, WebP · up to 10 MB · stays on your device</p>
-      {preview && <div className="relative mt-3">
-        <img src={preview} alt="Selected product or cart" className="aspect-[3/2] w-full rounded-md bg-muted object-contain" data-testid="product-image-preview" />
+      {preview && <div className="relative mt-3 overflow-hidden rounded-md border border-border bg-muted/40 p-2" data-testid="product-image-preview-frame">
+        <div className="mx-auto flex aspect-[4/3] max-h-64 w-full items-center justify-center sm:aspect-[3/2]">
+          <img src={preview} alt="Selected product or cart" className="h-full w-full object-contain" data-testid="product-image-preview" />
+        </div>
         <button type="button" onClick={clear} aria-label="Remove image" title="Remove image" data-testid="remove-product-image"
           className="focus-ring absolute right-1 top-1 rounded-full border border-border bg-background p-1.5 text-ink"><X className="h-4 w-4" /></button>
       </div>}
