@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Static sitemap covering YuktiCart's content pages. Store (/stores/:slug) and
+  category (/category/:slug) pages are data-driven from MongoDB and are not
+  listed here yet — generating those would need a backend-rendered sitemap
+  endpoint, which is out of this phase's narrow scope.
+-->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://yukticart.com/</loc><priority>1.0</priority></url>
+  <url><loc>https://yukticart.com/stores</loc><priority>0.8</priority></url>
+  <url><loc>https://yukticart.com/deals</loc><priority>0.8</priority></url>
+  <url><loc>https://yukticart.com/brands</loc><priority>0.6</priority></url>
+  <url><loc>https://yukticart.com/categories</loc><priority>0.6</priority></url>
+  <url><loc>https://yukticart.com/how-it-works</loc><priority>0.7</priority></url>
+  <url><loc>https://yukticart.com/about</loc><priority>0.5</priority></url>
+  <url><loc>https://yukticart.com/mission</loc><priority>0.4</priority></url>
+  <url><loc>https://yukticart.com/faq</loc><priority>0.6</priority></url>
+  <url><loc>https://yukticart.com/contact</loc><priority>0.4</priority></url>
+  <url><loc>https://yukticart.com/report-rate</loc><priority>0.3</priority></url>
+  <url><loc>https://yukticart.com/suggest</loc><priority>0.3</priority></url>
+  <url><loc>https://yukticart.com/privacy</loc><priority>0.2</priority></url>
+  <url><loc>https://yukticart.com/terms</loc><priority>0.2</priority></url>
+  <url><loc>https://yukticart.com/affiliate-disclosure</loc><priority>0.2</priority></url>
+  <url><loc>https://yukticart.com/cashback-disclaimer</loc><priority>0.2</priority></url>
+  <url><loc>https://yukticart.com/cookie-policy</loc><priority>0.2</priority></url>
+</urlset>
