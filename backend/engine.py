@@ -112,10 +112,7 @@ def rate_is_eligible(rate, price, customer_type, today=None, card=None):
 def apply_rate(rate, price):
     """Compute saving amount + applied base for an eligible rate (exact Decimal)."""
     price = D(price)
-    kind = rate.get("platform_kind")
     cap = rate.get("maximum_eligible_amount")
-    if kind == "affiliate" and rate.get("maximum_cashback_amount") not in (None, ""):
-        cap = None
     if cap not in (None, ""):
         applied_to = min(price, D(cap))
     else:
@@ -215,12 +212,34 @@ def best_rule_for_side(rules, price, product_category, customer_type, today=None
                        card=None, product_url=None, gift_card_denominations=None):
     """Choose by eligible rule specificity before comparing monetary savings."""
     evaluated = []
-    for rate in rules:
-        if not category_matches(rate.get("category_name"), product_category):
+    category_unknown = not product_category or product_category.strip().lower() == "all"
+    # Missing details must not let a generic rate bypass a possible specific
+    # exclusion. Keep other partners and independently valid gift/card routes.
+    pending_by_partner = {}
+    for rule in rules:
+        current, _ = rate_is_eligible(rule, price, customer_type, today, card)
+        if not current:
             continue
-        if rate.get("product_match") and not product_matches(rate["product_match"], product_url):
+        needs_category = category_unknown and (rule.get("category_name") or "").lower() != "all"
+        needs_product = (rule.get("product_match") and not product_url
+                         and (category_unknown or category_matches(rule.get("category_name"), product_category)))
+        if needs_category or needs_product:
+            partner = rule.get("platform_id") or rule.get("platform_name")
+            pending_by_partner[partner] = ("Category needed to verify cashback eligibility"
+                                           if needs_category else "Product link needed to verify product-specific eligibility")
+    for rate in rules:
+        category_pending = category_unknown and (rate.get("category_name") or "").lower() != "all"
+        if not category_pending and not category_matches(rate.get("category_name"), product_category):
+            continue
+        if rate.get("product_match") and product_url and not product_matches(rate["product_match"], product_url):
             continue
         eligible, reasons = rate_is_eligible(rate, price, customer_type, today, card)
+        pending = pending_by_partner.get(rate.get("platform_id") or rate.get("platform_name"))
+        if category_pending:
+            reasons.append("Category needed to verify cashback eligibility")
+        elif pending:
+            reasons.append(pending)
+        eligible = eligible and not category_pending and not pending
         amount = price
         if eligible and gift_card_denominations is not None:
             cap = rate.get("maximum_eligible_amount")
@@ -608,6 +627,22 @@ def calculate_stack(store, product_category, customer_type, mrp, price,
     affiliate["skipped"] = bool(affiliate["has_winner"] and not affiliate["applied"])
     gift_card["skipped"] = bool(gift_card["has_winner"] and not gift_card["applied"])
 
+    pending_reasons = [reason for entry in aff_eval for reason in entry["reasons"]
+                       if "needed to verify" in reason]
+    cashback_estimate = {
+        "status": ("estimated" if aff_winner and cashback_saving > 0 else
+                   "excluded" if aff_winner else "needs_details" if pending_reasons else "unavailable"),
+        "amount": money_out(cashback_saving) if aff_winner else None,
+        "applied_to": money_out(aff_winner["applied_to"]) if aff_winner else None,
+        "included_in_stack": affiliate_applied,
+        "reason": ("Based on configured rates and the supplied transaction details; subject to partner approval."
+                   if aff_winner and cashback_saving > 0 else
+                   "A configured zero-rate rule excludes cashback for these details." if aff_winner else
+                   pending_reasons[0] if pending_reasons else
+                   next((reason for entry in aff_eval for reason in entry["reasons"]),
+                        "No eligible cashback rate is available for these details.")),
+    }
+
     checkout_steps = []
     if double_stack:
         checkout_steps = [
@@ -670,6 +705,7 @@ def calculate_stack(store, product_category, customer_type, mrp, price,
             } if card else {}),
         },
         "affiliate": affiliate,
+        "cashback_estimate": cashback_estimate,
         "gift_card": gift_card,
         **({"card_offer": card_offer} if card else {}),
         "checkout_steps": checkout_steps,
